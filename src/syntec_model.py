@@ -234,6 +234,9 @@ class LadderProject:
         self.prefix = {}         # rung 序号 -> 该 rung 之前的注释行原始字节
         self.raw_rungs = {}      # rung 序号 -> 原始 40 字节×N (模型表达不了时)
         self.left_anchor = {}    # rung 序号 -> 单元素行是否靠左 (从原件读入时保留)
+        # 新建工程时要写出的注释 (读入的注释已经在 head_raw/tail_raw/prefix 里, 不填这两项)
+        self.header_comments = []   # [(文本, CommentType)] 放在所有逻辑行之前
+        self.varcmts = []           # [(地址, 短注释, 长注释)] 放在文件最末
         if not (keep_path and getattr(self, "path", None)):
             self.path = default_save_path()
 
@@ -281,6 +284,14 @@ class LadderProject:
         s, l = self.comments.get(addr, ("", ""))
         self.comments[addr] = (short if short is not None else s,
                                long if long is not None else l)
+
+    def add_header_comment(self, text, ct=1):
+        """在逻辑行之前加一条注释 (ct=1 占一行显示; ct=2 版本记录; ct=3 同类)。"""
+        self.header_comments.append((text, ct))
+
+    def add_varcmt(self, addr, short="", long=""):
+        """加一条设备变量注释 (ct=4), 编辑器里挂在地址上, 不占行、不影响梯形图布局。"""
+        self.varcmts.append((str(addr).upper(), short, long))
 
     # ---- 校验 ----
     def validate(self):
@@ -380,6 +391,10 @@ class LadderProject:
     def to_lad_bytes(self):
         out = bytearray()
         out += getattr(self, 'head_raw', b'')
+        # 新建工程写的注释: 开头几行说明 + 文件最末的设备变量注释。
+        # 读入已有文件时这两项为空, 原注释由 head_raw/prefix/tail_raw 原样带回, 不会重复写。
+        for text, ct in getattr(self, 'header_comments', []):
+            out += L.enc_comment(text, ct)
         prefix = getattr(self, 'prefix', {})
         raw_rungs = getattr(self, 'raw_rungs', {})
         for i, els in enumerate(self.rungs):
@@ -389,6 +404,8 @@ class LadderProject:
             else:
                 out += to_rung_bytes(els, getattr(self, 'left_anchor', {}).get(i))
         out += prefix.get(len(self.rungs), b'')  # 文件末尾的注释行
+        for addr, short, long_ in getattr(self, 'varcmts', []):
+            out += L.enc_varcmt(addr, short, long_)
         out += getattr(self, 'tail_raw', b'')
         out += b'\x00\xfe'
         return bytes(out)

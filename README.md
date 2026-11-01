@@ -29,7 +29,7 @@
 │   ├── syntec_re.py                  # 早期解码器（报告用）
 │   ├── syntec_address_db.py/.json    # 602 条标准地址库
 │   └── build_bundle.py               # 打包单文件版
-├── tools/                            # 验证脚本
+├── tools/                            # 验证脚本 (含 verify_comments.py 注释编码验证)
 ├── samples/                          # 编辑器手工产出的测试样本
 └── docs/                             # 逆向过程记录
 ```
@@ -97,7 +97,8 @@ python tools/selftest.py
 | `dump_rungs` | 把当前工程的 rung 导出成元件列表 |
 | `lookup_address` | 查标准地址含义，如 `C36`、`急停`、`主轴倍率` |
 | `add_rung` | 追加一行：串联条件 + 结果元件，或给完整元件列表（含并联） |
-| `set_comment` | 给地址加短/长批注（写进文件，编辑器里能看到） |
+| `set_comment` | 给地址加设备变量注释（ct=4，挂在地址上，不占行）|
+| `add_comment_line` | 在梯形图前加整行注释（ct=1，占编辑器行号）|
 | `validate` | 结构校验：缺 END、地址越界、无输出元件、双线圈、定时器重号 |
 | `preview` | 把当前工程回显成文本 |
 | `save` | 写出 `.lad`，返回路径与字节数 |
@@ -183,6 +184,7 @@ python tools/selftest.py                        # 自带数据，不需要样本
 python tools/roundtrip_full.py                  # 用 samples/ 里的语料
 python tools/verify_samples.py                  # 元件逐字节验证
 python tools/verify_parallel.py                  # 并联结构验证
+python tools/verify_comments.py                  # 注释编码验证(自带样例 + 真机语料)
 
 # 换成自己的样本目录
 python tools/roundtrip_full.py --samples D:/my_lad

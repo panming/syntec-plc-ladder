@@ -92,7 +92,8 @@ def main():
 
     chk("initialize 服务名", got.get(1, {}).get("serverInfo", {}).get("name") == "syntec-ladder")
     tools = [t["name"] for t in got.get(2, {}).get("tools", [])]
-    chk("工具数 = 11", len(tools) == 11, str(len(tools)))
+    chk("工具齐全", len(tools) >= 12 and {"set_comment", "add_comment_line"} <= set(tools),
+        str(len(tools)))
     chk("新增读工具齐全", all(n in tools for n in ("load_lad", "read_ladder", "dump_rungs")))
     chk("并联展开为 2 行", "展开为 2 行" in text(5), text(5))
     chk("校验无告警", "校验通过" in text(8), text(8))

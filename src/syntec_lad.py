@@ -110,7 +110,12 @@ def decode(data: bytes):
     while pos + 4 <= n:
         b0,b1,b2,b3 = data[pos:pos+4]
         if b1 == 0x00 and (b2 != 0 or b3 != 0):
-            break  # 进入网格后段(00 fe 或 批注)
+            # 非逻辑记录 (注释行 / 版本 / 设备变量注释): 不是网格, 整段跳过再继续。
+            # 一条注释占 1 + ceil((字节数-18)/20) 条记录 (见 enc_comment)。
+            nb = b2
+            skip = 1 if nb <= 18 else 1 + (nb - 18 + 19) // 20
+            pos += skip * 40
+            continue
         if b1 == 0xcf:              # END: 双格块 (后 4 字节是保留区)
             if pos + 8 > n:
                 break
@@ -363,6 +368,52 @@ def emit_row(grid):
         else:
             out+=enc_4(cell)
     return bytes(out)
+
+# ---- 注释记录 (CommentType: 1/3 普通注释行, 2 版本记录, 4 设备变量注释) ----
+# 编码规则由 syntec_re.parse_raw 反推 (那份是编辑器 mainForm.Openfile 的忠实移植),
+# 写的时候必须严格是它的逆运算, 否则编辑器读回来字符会错位:
+#   首记录: [0,0,字节数,ct] + byte4..5 空, 从 byte6 起每 4 字节槽放 2 个字节 (9 槽 = 18B)
+#   续记录: byte0..1 空,      从 byte2 起每 4 字节槽放 2 个字节 (10 槽 = 20B)
+# 槽内两字节是连续的, 一个双字节汉字不会跨槽; byte2 存的是**字节数**不是字符数。
+# 注释文字用 cp950(Big5) 编码 —— 新代编辑器固定用这套, 与界面语言无关,
+# 所以简体的「润/压/锁」写不进去, 得用「潤/壓/鎖」。
+CMT_ENCODING = 'cp950'
+CMT_FIRST_STARTS = tuple(range(6, 40, 4))    # 6,10,...,38
+CMT_NEXT_STARTS = tuple(range(2, 40, 4))     # 2,6,...,38
+
+
+def _put_bytes(rec, starts, data, i):
+    for s in starts:
+        for k in (0, 1):
+            if i < len(data):
+                rec[s + k] = data[i]
+                i += 1
+    return i
+
+
+def enc_comment(text, ct=1, encoding=CMT_ENCODING):
+    """一条注释 -> N 条 40 字节记录 (N = 1 + ceil((len-18)/20))。
+    text 可以是 str 或已经编好码的 bytes; 超过 255 字节要自己拆成多条。"""
+    raw = text.encode(encoding) if isinstance(text, str) else bytes(text)
+    if len(raw) > 255:
+        raise ValueError(f"注释 {len(raw)} 字节, 超过单条上限 255; 请拆成多条")
+    rec = bytearray(40)
+    rec[2] = len(raw)
+    rec[3] = ct
+    i = _put_bytes(rec, CMT_FIRST_STARTS, raw, 0)
+    out = bytearray(rec)
+    while i < len(raw):
+        rec = bytearray(40)
+        i = _put_bytes(rec, CMT_NEXT_STARTS, raw, i)
+        out += rec
+    return bytes(out)
+
+
+def enc_varcmt(addr, short='', long='', encoding=CMT_ENCODING):
+    """设备变量注释 (ct=4)。编辑器里内容形如 `R808\t程式鎖\t程式鎖定用旗標`。
+    地址与短注释后面都跟一个空格, 与真机文件一致。"""
+    return enc_comment(f"{addr} \t{short} \t{long}", 4, encoding)
+
 
 def build_grid(rungs):
     out=bytearray()

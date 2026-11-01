@@ -172,6 +172,22 @@ def split_records(data):
     return logic, others, len(data) - n * 40
 
 
+def editor_rows(logic, others):
+    """逻辑行索引 -> 它之前的注释行条数。
+
+    ct=1/3 的注释**占编辑器的行**, 所以编辑器行号 = 逻辑行号 + 前面注释数 + 1。
+    这里给每个逻辑行索引算出前缀和, 渲染时才能标对行号 (否则带注释的文件会差几行)。
+    """
+    before = [0] * (len(logic) + 1)
+    for lr, _raw in others:
+        before[min(lr, len(logic))] += 1
+    cum, s = [], 0
+    for i in range(len(logic) + 1):
+        s += before[i]
+        cum.append(s)
+    return cum
+
+
 def read_ladder(path):
     """读入一个 .lad, 返回结构化的梯形图信息 (不改动任何全局状态)
 
@@ -188,9 +204,12 @@ def read_ladder(path):
     trees = P.reconstruct(rows)
 
     rungs = []
+    erow = editor_rows(logic, others)
     for node, la, a, b, why in trees:
         rec = {'index': len(rungs) + 1, 'row_start': a + 1, 'row_end': b + 1,
-               'rows': b - a + 1, 'left_anchor': la}
+               'rows': b - a + 1, 'left_anchor': la,
+               'editor_row_start': a + 1 + erow[a],
+               'editor_row_end': b + 1 + erow[b]}
         if node is None:
             if why == 'blank':
                 rec.update(elements=None, ok=True, why='空白行',
@@ -308,15 +327,16 @@ def _walk_elements(els):
 def render_file(path, start=1, end=None):
     """把指定范围的 rung 画成带竖线的梯形图文本 (start/end 是 rung 序号, 1 基)"""
     data = open(path, 'rb').read()
-    logic, _o, _t = split_records(data)
+    logic, others, _t = split_records(data)
     rows = [P.decode_row(r) for r in logic]
+    erow = editor_rows(logic, others)      # 注释行占编辑器行, 行号要算进去
     out = []
     for k, (node, la, a, b, why) in enumerate(P.reconstruct(rows), 1):
         if k < start or (end and k > end):
             continue
-        out.append(f'--- R{k} (编辑器行 {a + 1}-{b + 1}) ---')
+        out.append(f'--- R{k} (编辑器行 {a + 1 + erow[a]}-{b + 1 + erow[b]}) ---')
         for r in range(a, b + 1):
             # decode_row 给的是 (conn, 语义, 原始字节); 渲染只要前两项
             grid = [None if c is None else (c[0], c[1]) for c in rows[r]]
-            out.append(f'{r + 1:>4}  {Y.render_line(grid)}')
+            out.append(f'{r + 1 + erow[r]:>4}  {Y.render_line(grid)}')
     return '\n'.join(out)

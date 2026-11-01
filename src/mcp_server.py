@@ -167,15 +167,36 @@ TOOLS = [
     },
     {
         "name": "set_comment",
-        "description": "给某地址加短批注/长批注(写入 .lad 批注块, 编辑器可显示)。addr 如 'C36' / 'O10'。",
+        "description": (
+            "给某地址加设备变量注释(ct=4, 挂在地址上, 不占行、不影响梯形图布局), 保存后写入 .lad。\n"
+            "addr 如 'C36' / 'O10' / 'TM0'。\n"
+            "重要: .lad 内部注释固定用 cp950(Big5) 编码, 与编辑器界面语言无关 —— "
+            "简体字「润/压/锁/电」写不进去, 必须用繁体「潤/壓/鎖/電」, 否则编辑器里是问号。"
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "addr": {"type": "string", "description": "地址, 如 C36"},
-                "short": {"type": "string", "description": "短批注"},
-                "long": {"type": "string", "description": "长批注"},
+                "short": {"type": "string", "description": "短批注 (编辑器里挂在元件旁, 建议 4~8 字)"},
+                "long": {"type": "string", "description": "长批注 (交叉引用里显示, 可写全, 单条 ≤255 字节)"},
             },
             "required": ["addr"],
+        },
+    },
+    {
+        "name": "add_comment_line",
+        "description": (
+            "在梯形图之前加一条整行注释(ct=1, 编辑器里占一行显示), 常用于程序标题、参数说明、I/O 速查。\n"
+            "注意: 这类注释**占编辑器的行号**, 加几条, 后面所有梯形图行的行号就往后挪几行。\n"
+            "只放在所有梯形图之前 —— END 之后放注释行会让编辑器认为 END 不是最后一行。\n"
+            "编码同样是 cp950, 简体字要转繁体。"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "注释内容 (单条 ≤255 字节, 约 120 个汉字)"},
+            },
+            "required": ["text"],
         },
     },
     {
@@ -345,9 +366,29 @@ def h_add_rung(args):
             f"当前共 {len(PROJECT.rungs)} 条 rung / {total} 个编辑器行。")
 
 
+def h_add_comment_line(args):
+    text = args["text"]
+    import syntec_lad as _L
+    try:
+        PROJECT.add_header_comment(text)
+        n = len(_L.enc_comment(text, 1)) // 40
+    except Exception as e:
+        return f"添加注释失败: {e}"
+    return (f"已添加注释行（{n} 条记录）：{text}\n"
+            f"当前 {len(PROJECT.rungs)} 条 rung，编辑器里梯形图从第 "
+            f"{len(PROJECT.header_comments) + 1} 行开始。")
+
+
 def h_set_comment(args):
-    PROJECT.set_comment(args["addr"], args.get("short"), args.get("long"))
-    return f"已为 {args['addr']} 设置批注。"
+    addr = args["addr"]
+    PROJECT.set_comment(addr, args.get("short"), args.get("long"))
+    # 同时也写成设备变量注释 (ct=4), 这样 save 时才真的落盘到 .lad;
+    # 只调 set_comment 的话它只存在内存里, 存文件不会有任何变化。
+    s, l = PROJECT.comments.get(str(addr).upper(), ("", ""))
+    PROJECT.add_varcmt(addr, s, l)
+    return (f"已为 {addr} 设置批注 (短={s!r} 长={l!r})，保存时写入文件。\n"
+            f"提示: .lad 内部注释固定用 cp950(Big5) 编码，简体的「润/压/锁」"
+            f"写不进去，请用「潤/壓/鎖」，否则编辑器里显示成问号。")
 
 
 def h_validate(args):
@@ -433,6 +474,7 @@ TOOL_HANDLERS = {
     "lookup_address": h_lookup_address,
     "add_rung": h_add_rung,
     "set_comment": h_set_comment,
+    "add_comment_line": h_add_comment_line,
     "validate": h_validate,
     "preview": h_preview,
     "save": h_save,
@@ -470,7 +512,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.5.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.6.0"},
         }
     if method == "ping":
         return {}
