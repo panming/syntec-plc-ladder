@@ -360,7 +360,9 @@ class LadderProject:
                 continue
             for el in leaves(els):
                 k = el.get("kind")
-                if k == "coil" and el.get("addr"):
+                # SET/RESET(S/R) 是"写指令", 同一地址多处驱动正是它的标准用法
+                # (锁存报警、多处停车就是靠它避开双线圈), 不能算双线圈冲突。
+                if k == "coil" and el.get("addr") and el.get("norm", "NO") in ("NO", "NC", "RP", "FP"):
                     _hit("线圈", el["addr"], ri)
                 elif k == "timer" and el.get("name"):
                     _hit("定时器", el["name"], ri)

@@ -24,6 +24,8 @@ TYPE4 = {
     0x00: 'EMPTY', 0x0d: 'WIRE', 0xcf: 'END',
     0xd0: 'RTS', 0xfd: 'FEND',
     0x01: ('CONTACT','NO'), 0x03: ('CONTACT','NC'),
+    0x09: ('CONTACT_T','NO'), 0x0a: ('CONTACT_T','NC'),   # 定时器触点 (编号 1 字节)
+    0x0b: ('CONTACT_C','NO'), 0x0c: ('CONTACT_C','NC'),   # 计数器触点
     0x0e: ('COIL','NO'), 0x10: ('COIL','NC'),
     0x05: ('COIL','RP'), 0x07: ('COIL','FP'),
     0x12: ('COIL','LATCH'), 0x14: ('COIL','UNLATCH'),
@@ -109,7 +111,12 @@ def decode(data: bytes):
         b0,b1,b2,b3 = data[pos:pos+4]
         if b1 == 0x00 and (b2 != 0 or b3 != 0):
             break  # 进入网格后段(00 fe 或 批注)
-        if b1 in TYPE8:
+        if b1 == 0xcf:              # END: 双格块 (后 4 字节是保留区)
+            if pos + 8 > n:
+                break
+            cur.append(('END', b0, b2, b3, pos))
+            pos += 8; col += 2
+        elif b1 in TYPE8:
             if pos + 8 > n:
                 break
             param = data[pos+4:pos+8]
@@ -138,6 +145,14 @@ def vflag(b0):
     if b0&8: s+='R'
     return s
 
+_BITDEV = {0:'I', 1:'O', 2:'C', 3:'S', 4:'A'}
+
+def _bit_addr(n):
+    """位设备 16 位编码 -> 可读地址 (n = 设备索引<<9 | 编号)。
+    R 寄存器位用的是另一套编码 (n4<<12|...), 解不出来就原样显示十六进制。"""
+    d, num = n >> 9, n & 0x1FF
+    return f"{_BITDEV[d]}{num}" if d in _BITDEV else f"0x{n:04x}"
+
 def cell_label(c):
     if c[0]=='FB':
         _,typ,b2,b3,param,_=c
@@ -165,8 +180,10 @@ def cell_label(c):
     if t=='RTS':   return 'RTS'
     if t=='FEND':  return 'FEND'
     kind,sub=t
-    if kind=='CONTACT': return f"[I{b2} {sub}]{vf}"
-    if kind=='COIL':    return f"[O{b2} {sub}]{vf}"
+    if kind=='CONTACT':   return f"[{_bit_addr(b2|(b3<<8))} {sub}]{vf}"
+    if kind=='COIL':      return f"[{_bit_addr(b2|(b3<<8))} {sub}]{vf}"
+    if kind=='CONTACT_T': return f"[TM{b2} {sub}]{vf}"
+    if kind=='CONTACT_C': return f"[CT{b2} {sub}]{vf}"
     return str(t)
 
 def show(data, name=''):

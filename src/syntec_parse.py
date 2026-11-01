@@ -63,6 +63,8 @@ def decode_cell(op, raw):
 
 def decode_block(op, buf):
     """8 字节单元 -> 语义元组"""
+    if op == 0xcf:                    # END 是双格块 (后 4 字节保留), 不是带标签的流程块
+        return ('END',)
     info = R.op_info(op)
     if not info:
         return ('RAW', bytes(buf))
