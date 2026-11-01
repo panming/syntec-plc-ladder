@@ -230,6 +230,9 @@ FLOW_NAME = {v: k for k, v in FLOW_TYPE.items()}
 # 宽度: JSR/LAB 带 6 字节标签 => 8 字节(2 列); RTS/FEND 无标签 => 4 字节(1 列)
 #   cnc_1.lad 实测: LAB "001"=[00 d5 30 30 31 00 00 00] (8B)
 #                   RTS       =[00 d0 00 00] (4B, 后接普通连接线)
+# 带标签的流程块才占双格(8 字节, 6 字节标签); RTS/FEND/END 无参数, 只占 1 格。
+# 注意: 编辑器 opcode 属性表里这些的 bi 位也是 1, 但序列化时确实只写 4 字节 ——
+# 实测 cnc_1.lad 的 RTS 后面紧跟的是横线格 00 0d 00 00, 说明第 2 格不归它。
 FLOW_WIDE = {'JMP':1, 'JSR':1, 'MSG':1, 'LAB':1, 'RTS':0, 'FEND':0, 'END':0}
 
 def enc_flow(op, label=''):
@@ -248,12 +251,13 @@ def enc_el(el):
     不会出现 8 字节块被算成 1 列这种错位。
 
     el 形态:
-      ('EMPTY',) ('WIRE',) ('END',)                     4 字节
+      ('EMPTY',) ('WIRE',)                              4 字节
+      ('END',)                                          8 字节 (双格, 后 4 字节保留)
       ('CONTACT','NO'|'NC', n)  ('COIL', 符号, n)         4 字节
       ('CONTACT_T','NO'|'NC', tm号)  定时器触点 0x09/0x0a  4 字节
       ('CONTACT_C','NO'|'NC', ct号)  计数器触点 0x0b/0x0c  4 字节
       ('FB', cat, op, A, B[, param])                     8 字节 (cat=MATH/MOVE/LOGIC/CMP/ROT/TIMER/CNTR)
-      ('FB','FLOW', 助记符, 标签)                          JSR/LAB 8 字节, RTS/FEND 4 字节
+      ('FB','FLOW', 助记符, 标签)                          带标签 8 字节; RTS/FEND 4 字节
       ('FLOW4', opcode) / ('FLOW8', opcode, 6字节原样)     反序列化用, 字节原样保留
       ('RAW', 原始字节)                                   反序列化用, 完全原样
     """
@@ -264,7 +268,13 @@ def enc_el(el):
         return bytes([0, el[1]]) + bytes(el[2]).ljust(6, b'\x00')
     if k == 'FLOW4':
         return bytes([0, el[1], 0, 0])
-    if k in ('EMPTY', 'WIRE', 'END', 'CONTACT', 'COIL'):
+    if k == 'END':
+        # END 在编辑器里是双格块: 后 4 字节是保留区。
+        # 实测 cnc.lad 的 END 单元 = 00 cf 00 00 00 00 00 80,
+        # samples/B_branch.lad 的 = 00 cf 00 00 00 00 00 00 —— 结构完全相同, 只是保留字节不同。
+        # RTS / FEND 则确实只占 1 格 (后面紧跟横线), 两者不一样, 别合并处理。
+        return bytes([0, 0xcf, 0, 0, 0, 0, 0, 0])
+    if k in ('EMPTY', 'WIRE', 'CONTACT', 'COIL'):
         return enc_4(el)
     if k == 'CONTACT_T':
         return bytes([0, 0x09 if el[1] == 'NO' else 0x0a, el[2] & 0xff, 0])

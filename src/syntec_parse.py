@@ -23,6 +23,17 @@ import syntec_re as R
 
 COLS = 10
 
+# RTS / FEND 在编辑器 opcode 属性表里 bi 位也是 1, 但序列化时只写 4 字节(无参数)。
+# 若按 bi 当 8 字节解析, 会把后面一格吞进参数区, 整行错位一格。
+# 实测依据: cnc_1.lad 的 RTS 行 = 00 d0 00 00 + 9 个横线格, 正好 10 格。
+# (END 不同, 它确实是双格, 见 syntec_lad.enc_el 的说明。)
+FLOW_4BYTE = (0xd0, 0xfd)            # RTS / FEND
+
+
+def is_wide(op):
+    """该 opcode 是否真的占 8 字节(2 格)"""
+    return R.is_bi(op) and op not in FLOW_4BYTE
+
 
 # ==================== 单元解码 ====================
 def decode_cell(op, raw):
@@ -82,7 +93,7 @@ def decode_row(rec):
     while i < COLS:
         c0 = i * 4
         op = rec[c0 + 1]
-        if R.is_bi(op) and i < COLS - 1:
+        if is_wide(op) and i < COLS - 1:
             raw = bytes(rec[c0:c0 + 8])
             slots.append((rec[c0], decode_block(op, raw), raw))
             slots.append(None)
