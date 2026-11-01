@@ -7,6 +7,8 @@
   并且做到「读进来再存回去，逐字节完全一样」
 - **写**：用自然语言让 AI 拼出合法的二进制 `.lad`，用新代 PLC 编辑器打开就能看
 - **纯 Python 标准库**，零依赖，Windows / macOS / Linux 都能跑
+- **附带技能包** `skill/syntec-plc/`：把这个 MCP 用起来的「操作手册」，
+  装到 WorkBuddy 里，AI 就知道该先查地址、该怎么避开双线圈、注释为什么要转繁体
 
 > 这个项目是**黑盒逆向**的产物：没有官方格式文档，全部规则来自
 > 「编辑器造样本 → 十六进制差分 → 全量真实程序回归验证」。
@@ -20,7 +22,7 @@
 ├── TECHNICAL.md                      # .lad 文件格式技术文档（重点）
 ├── syntec-ladder-mcp-standalone.py   # 单文件版，直接能用
 ├── src/                              # 源码
-│   ├── mcp_server.py                 # MCP 服务端（11 个工具）
+│   ├── mcp_server.py                 # MCP 服务端（12 个工具）
 │   ├── syntec_lad.py                 # 单元编码 / 解码
 │   ├── syntec_layout.py              # 布局引擎：网络树 → 网格
 │   ├── syntec_parse.py               # 反序列化：网格 → 网络树
@@ -31,7 +33,8 @@
 │   └── build_bundle.py               # 打包单文件版
 ├── tools/                            # 验证脚本 (含 verify_comments.py 注释编码验证)
 ├── samples/                          # 编辑器手工产出的测试样本
-└── docs/                             # 逆向过程记录
+├── docs/                             # 逆向过程记录
+└── skill/syntec-plc/                 # AI 技能包：让 AI 会写新代 PLC
 ```
 
 ---
@@ -87,7 +90,7 @@ python tools/selftest.py
 
 ---
 
-## 11 个工具
+## 12 个工具
 
 | 工具 | 作用 |
 |---|---|
@@ -103,6 +106,65 @@ python tools/selftest.py
 | `preview` | 把当前工程回显成文本 |
 | `save` | 写出 `.lad`，返回路径与字节数 |
 | `explain_format` | 返回格式要点与已知限制 |
+
+---
+
+## 给 AI 用的技能包（`skill/syntec-plc/`）
+
+MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力**。
+同一个工具，AI 可能写出「一个 `O` 挂三个线圈」，也可能拿 `C` 段当中间继电器用——
+这两类错都能生成合法文件，到现场才炸。
+
+`skill/syntec-plc/` 就是补这部分：把「怎么写才对」固化下来。
+
+### 里面有什么
+
+```
+skill/syntec-plc/
+├── SKILL.md                        # 工作流 + 硬约束 + 反模式清单
+├── references/
+│   ├── element-grammar.md          # add_rung 的完整元件语法、地址规则、定时器 K 值换算
+│   ├── patterns.md                 # 12 个机床工艺模式（启保停/自动手动/锁存报警/单次动作/互锁…）
+│   ├── lad-format.md               # 字节结构速查，排错用
+│   └── comment-encoding.md         # cp950 规则 + 简繁对照表
+├── scripts/
+│   ├── check_lad.py                # 字节级体检，纯 stdlib，不依赖仓库
+│   └── zh_tw.py                    # 简体转繁体 + cp950 可编码性检查
+└── assets/
+    └── build_program.py            # 离线生成模板（含扫描级仿真器）
+```
+
+`SKILL.md` 是入口，其余按需加载——AI 只在用到时才读对应的 reference，不占上下文。
+
+### 怎么装
+
+WorkBuddy 的技能目录是 `~/.workbuddy/skills/`（用户级，所有项目可用）
+或项目内的 `.workbuddy/skills/`（跟仓库走）。
+
+```bash
+# 方式一：从仓库直接复制
+cp -r skill/syntec-plc ~/.workbuddy/skills/
+
+# 方式二：用打包好的 zip
+unzip syntec-plc.zip -d ~/.workbuddy/skills/
+```
+
+装完后重启会话，技能列表里会出现 `syntec-plc`。
+
+> MCP 和技能是**两件独立的事**，要分别装：
+> MCP 给工具，技能给方法。只装技能不装 MCP，AI 会被技能明确告知
+> 「不要手搓字节，先让用户安装 MCP」；只装 MCP 不装技能，AI 有工具但缺判断。
+
+### 它挡掉了哪些坑
+
+| 坑 | 技能里的对策 |
+|---|---|
+| 生成合法但逻辑错的程序 | 硬约束表 + 12 个已验证工艺模式 |
+| 拿 `C` 段当中间继电器（撞系统急停/倍率） | 开写前必须 `lookup_address` 查 |
+| 一个输出挂多个线圈，只有最后一处生效 | 「收敛到 S 位 + LATCH/UNLATCH」 |
+| 注释用简体，编辑器显示问号 | `zh_tw.py` + 前置检查 |
+| 地址超 511 被静默截断 | 硬约束表写明，工具已改为直接报错 |
+| 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |
 
 ---
 

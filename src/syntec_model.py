@@ -76,6 +76,11 @@ def addr_bits(s):
     else:
         base, bit = int(val), 0
     if kind in DEV_INDEX:
+        # 编号只有 9 位, 超出会被 & 0x1FF 静默截断 (I600 -> I88)。宁可报错。
+        if not 0 <= base <= 511:
+            raise ValueError(
+                f"地址 {s} 越界: {kind} 段编号只编 9 位, 有效范围 0..511, "
+                f"写 {base} 会被截断成 {kind}{base & 0x1FF}")
         return (DEV_INDEX[kind] << 9) | (base & 0x1FF)
     if kind == 'R':
         n4 = base // 128 + 1
@@ -87,6 +92,16 @@ def addr_bits(s):
 # ----------------------------------------------------------------------------
 # 元件 dict -> syntec_lad 的 enc 元组
 # ----------------------------------------------------------------------------
+def _rng(what, v, hi, lo=0):
+    """编码前的范围检查。越界一律报错 —— 这些字段都是按位截断写入的,
+       截断后文件仍然"合法", 编辑器也能打开, 只是编号悄悄变了另一台设备。
+       这种错只能靠现场调试发现, 所以宁可在生成阶段直接拒绝。"""
+    v = int(v)
+    if not lo <= v <= hi:
+        raise ValueError(f"{what} = {v} 超出有效范围 {lo}..{hi}")
+    return v
+
+
 def to_enc(el):
     k = el.get("kind")
     if k == "raw":
@@ -96,9 +111,11 @@ def to_enc(el):
         norm = el.get("norm", "NO")
         return ('CONTACT', norm, addr_bits(el["addr"]))
     if k == "contact_t":
-        return ('CONTACT_T', el.get("norm", "NO"), int(el.get("index", 0)) & 0xff)
+        return ('CONTACT_T', el.get("norm", "NO"),
+                _rng("定时器触点编号 TM", el.get("index", 0), 255))
     if k == "contact_c":
-        return ('CONTACT_C', el.get("norm", "NO"), int(el.get("index", 0)) & 0xff)
+        return ('CONTACT_C', el.get("norm", "NO"),
+                _rng("计数器触点编号 CT", el.get("index", 0), 255))
     if k == "coil":
         norm = el.get("norm", "NO")
         return ('COIL', norm, addr_bits(el["addr"]))
@@ -106,21 +123,25 @@ def to_enc(el):
         return ('END',)
     if k == "timer":
         m = re.search(r'\d+', str(el.get("name", el.get("addr", "TM0"))))
-        idx = int(m.group()) if m else 0
+        idx = _rng("定时器编号 TM", int(m.group()) if m else 0, 255)
         precision = el.get("precision", "1s")          # '1s'/'0.1s'/'0.01s'/'0.001s'
         source = el.get("source", "K")                 # 'K'=常数  'R'=寄存器
         value = int(el.get("preset", 0))               # 常数预设值 或 寄存器号(R, 显示值即寄存器号)
         typ = L.TIMER_TYPE[(precision, source)]
         # 参数为 16 位小端整数: [值低字节, 值高字节, 值低字节, 0x80]
-        v = value & 0xffff
+        v = _rng("定时器预设值", value, 65535)
         param = bytes([v & 0xff, (v >> 8) & 0xff, v & 0xff, 0x80])
         return ('FB', 'TIMER', typ, idx, 0, param)
     if k == "counter":
         m = re.search(r'\d+', str(el.get("name", el.get("addr", "CT0"))))
-        idx = int(m.group()) if m else 0
+        idx = _rng("计数器编号 CT", int(m.group()) if m else 0, 255)
         direction = el.get("direction", "UP")          # UP/DOWN/RESET/RING_UP/RING_DOWN
         source = el.get("source", "K")                 # 'K'=预设值#N  'R'=寄存器R
-        X = int(el.get("preset", 0))                   # 预设值(#N) 或 寄存器号(R)
+        # 预设值(#N) 或 寄存器号(R)。实测样本的预设值只出现在 byte0
+        # (B_counter: CT1 preset 50 -> "32 00 00 80"; cnc.lad: CT1 -> "53 00 00 80"),
+        # byte1..2 恒为 0, 与定时器的 16 位写法不同。因此 > 255 的计数预设值
+        # 写法尚未验证, 超过就报错而不是猜一个放进去。
+        X = _rng("计数器预设值/寄存器号", el.get("preset", 0), 255)
         typ = L.CNTR_TYPE[(direction, source)]
         param = bytes([X & 0xff, 0, 0, 0x80])
         return ('FB', 'CNTR', typ, idx, 0, param)
@@ -280,10 +301,33 @@ class LadderProject:
         return idx
 
     def set_comment(self, addr, short=None, long=None):
+        """设置某地址的批注, 并**保证它会写进文件**。
+
+        注意两者的分工: self.comments 是查询用的内存字典(读入时由解析器填充),
+        self.varcmts 才是 to_lad_bytes 真正序列化的队列。早期只改 comments 不碰
+        varcmts, 结果 set_comment 之后存出来的文件一条注释都没有 —— 调用方完全
+        看不出来(set_comment 正常返回, validate 也不报)。
+
+        这里按"是否新地址"决定要不要入队:
+          - 读入已有工程时, 老批注由 head_raw/tail_raw 原样带回, 再入队就会重复;
+          - 新地址才需要新写一条 ct=4。
+        """
         addr = str(addr).upper()
-        s, l = self.comments.get(addr, ("", ""))
-        self.comments[addr] = (short if short is not None else s,
-                               long if long is not None else l)
+        old_s, old_l = self.comments.get(addr, ("", ""))
+        is_new = addr not in self.comments
+        new = (short if short is not None else old_s,
+               long if long is not None else old_l)
+        self.comments[addr] = new
+
+        varcmts = getattr(self, "varcmts", None)
+        if varcmts is None:
+            return
+        for k, (a, _s, _l) in enumerate(varcmts):
+            if a == addr:                      # 本工程内第二次设置: 原地更新
+                varcmts[k] = (addr, new[0], new[1])
+                return
+        if is_new:                             # 全新地址: 入队待写
+            varcmts.append((addr, new[0], new[1]))
 
     def add_header_comment(self, text, ct=1):
         """在逻辑行之前加一条注释 (ct=1 占一行显示; ct=2 版本记录; ct=3 同类)。"""
@@ -475,17 +519,20 @@ class LadderProject:
 # 便捷: 用标准地址名查询(供 MCP lookup_address 用)
 # ----------------------------------------------------------------------------
 def lookup_address(query):
+    """返回 (results, panel) 二元组。
+       results: [(地址, [含义, ...]), ...]  panel: [(功能名, 说明), ...]"""
     q = query.strip()
     # 直接是地址
     direct = ADB.lookup(q.upper())
     if direct:
-        return [(q.upper(), direct)]
+        return [(q.upper(), direct)], []
     # 关键词(中文或英文)模糊匹配: 扫描反向索引所有含义
     results = []
     seen = set()
+    qu = q.upper()
     for addr, meanings in ADB.REVERSE_INDEX.items():
         for m in meanings:
-            if q.lower() in m.lower() or q in addr:
+            if q.lower() in m.lower() or qu in addr:
                 key = (addr, tuple(m))
                 if key not in seen:
                     seen.add(key)
