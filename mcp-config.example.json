@@ -1,0 +1,9 @@
+{
+  "_说明": "把 args 里的路径改成你机器上 syntec-ladder-mcp-standalone.py 的实际位置。Windows 下反斜杠写两个，或者全用正斜杠 /。",
+  "mcpServers": {
+    "syntec-ladder": {
+      "command": "python",
+      "args": ["C:/Tools/syntec-ladder-mcp-standalone.py"]
+    }
+  }
+}
