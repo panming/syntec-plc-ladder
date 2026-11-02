@@ -22,6 +22,14 @@ import syntec_lad as L
 
 COLS = L.COLS
 
+# 单条 rung 的纵向行数上限。
+# 这**不是编辑器硬限**：.lad 格式里没有 rung 长度字段，行数只受编辑器实现限制。
+# 人工验证 (2026-11-02)：65 / 128 / 256 行的并联块都能正常打开，未探到真正的天花板。
+# 取 256（实测通过的最大值）当工具上限，目的是挡住误操作生成的畸形大行，
+# 而不是把它当格式规则去引用。
+# 参考：真机最长 59 行（cnc_1.lad R941-R999，52 分支）。
+MAX_RUNG_ROWS = 256
+
 
 # ==================== 网络树 ====================
 # ('LEAF', el) / ('SERIES', [nodes]) / ('PARALLEL', [nodes]) / ('GAP', n)
@@ -159,9 +167,10 @@ def to_grid(node, total=COLS, left_anchor=False):
             pads = [(a + gap, b + gap, r0, r1) for (a, b, r0, r1) in pads]
 
     n = len(rows)
-    if n > 64:
-        # 实测最大: cnc_1.lad R941-R999 一条 59 行 / 52 分支的大并联。
-        raise ValueError(f"本行需要 {n} 行, 超过 64 行上限")
+    if n > MAX_RUNG_ROWS:
+        raise ValueError(
+            f"本行需要 {n} 行, 超过工具上限 {MAX_RUNG_ROWS} 行"
+            f"（256 行实测可正常打开，更高未验证；确实需要请改 MAX_RUNG_ROWS）")
 
     # 建网格
     grid = [[(0, ('EMPTY',)) for _ in range(total)] for _ in range(n)]
