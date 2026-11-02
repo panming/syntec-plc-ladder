@@ -58,7 +58,7 @@ python syntec-ladder-mcp-standalone.py --selftest
 ### 方式 B：源码版
 
 ```bash
-git clone https://github.com/<你的账号>/syntec-plc-ladder.git
+git clone https://github.com/panming/syntec-plc-ladder.git
 cd syntec-plc-ladder
 python tools/selftest.py
 ```
