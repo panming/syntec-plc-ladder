@@ -23,10 +23,11 @@ SRC_DIR = os.path.join(ROOT, "dist", "syntec-ladder-mcp")
 OUT = (os.path.join(ROOT, "syntec-ladder-mcp-standalone.py") if _IN_SRC
        else os.path.join(HERE, "dist", "syntec-ladder-mcp-standalone.py"))
 
-MODULES = ["syntec_re", "syntec_lad", "syntec_layout", "syntec_address_db",
-           "syntec_model", "syntec_parse", "syntec_paths", "syntec_read"]
+MODULES = ["syntec_re", "syntec_lad", "syntec_layout", "syntec_r_iface",
+           "syntec_address_db", "syntec_model", "syntec_parse", "syntec_paths",
+           "syntec_read"]
 
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 
 HEADER = '''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-

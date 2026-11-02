@@ -221,22 +221,22 @@ def main():
         elif kind == "I":
             ro.append(f"`{a}` 是输入点，rung {fmt(rows_used)} 却在驱动它")
         elif kind == "R":
-            num = int("".join(c for c in a.split(".")[0] if c.isdigit()) or 0)
-            tag = DB._dir_tag(a) if hasattr(DB, "_dir_tag") else None
-            if tag == "S":
-                ro.append(f"`{a}` 手册标为 S 方向（核心→阶梯），rung {fmt(rows_used)} 却在写它")
-            elif num >= 512 and tag is None:
+            # R512~R1023 现在有逐条表(syntec_r_iface), 直接问 check_write 就行。
+            # 以前这里单独攒一批「请人工核对 1-1.4.4」—— 那张表做完之后这句提示
+            # 就成了噪音: 22 个地址里 21 个是 R590 提示讯息 / R603 禁止轴移动,
+            # 本来就是阶梯该写的。剩下判不了的是"手册未列明", check_write 返回
+            # None, 这里也不报 —— 手册没定义不等于 CNC 不认。
+            res = DB.check_write(a)
+            if res and res[0] == "error":
+                ro.append(f"`{a}`：{res[1]}（rung {fmt(rows_used)}）")
+            elif res and res[0] == "warn":
                 per_addr.append(f"`{a}`（rung {fmt(rows_used)}）")
-            else:
-                res = DB.check_write(a)
-                if res and res[0] == "error":
-                    ro.append(f"`{a}`：{res[1]}（rung {fmt(rows_used)}）")
     for x in ro:
         rep.add("错误", x)
     if per_addr:
-        rep.add("提示", f"{len(per_addr)} 处写入落在 R512 以上（手册写「依下表定义之」）",
-                "需按手册 1-1.4.4 逐条核对是不是阶梯该写的接口位：\n"
-                + "、".join(per_addr))
+        rep.add("提示", f"{len(per_addr)} 处写入落在手册标「保留」的地址上",
+                "只提示不阻断：保留区被厂商占用已有先例（R938~R940），"
+                "若现场确认可用就照用。\n" + "、".join(per_addr))
 
     # 4 触点用到的地址从不被驱动（只在 R/A 有意义；I/C/S 是外部给的）
     #    整字写入（MOVE/MATH）也算驱动了它的每一位，否则 R53.0 这种会误报

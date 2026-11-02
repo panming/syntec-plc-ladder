@@ -13,6 +13,17 @@
   - 这是 v1 知识库, 实机若有定制请在 verify 阶段核对。
 """
 
+try:
+    import syntec_r_iface as RIF      # R512~R1023 逐条权限, 生成文件
+except ImportError:                   # 被按文件路径 exec 时(工具里 load_db 那种), 没有 sys.path
+    import importlib.util as _ilu
+    import os as _os
+    _spec = _ilu.spec_from_file_location(
+        "syntec_r_iface",
+        _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "syntec_r_iface.py"))
+    RIF = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(RIF)
+
 # ---------------------------------------------------------------------------
 # 3.8.1 轴向相关 (16 轴, 列顺序 轴1..轴16)
 # 每条: type 为地址类型(C/S/R), axes 为 16 个元素
@@ -301,6 +312,30 @@ def _dir_tag(addr):
     return m.group(1) if m else None
 
 
+def _check_r_iface(s, num, bit):
+    """R512~R1023 逐条判。
+
+    区段表 1-1.4.3 对这一段写的是「依下表定义之」——整片判只读会误报 49 条
+    （R590 提示讯息、R603 禁止轴移动这些天天要写）, 整片判可写又会放过写
+    状态寄存器。所以权限逐条查 1-1.4.4。
+    """
+    cat, name = RIF.classify(num)
+    if cat in ("undefined", "unknown"):
+        # 手册没定义 != CNC 不认。写程序时别用, 但审别人的程序不能判成错:
+        # R938~R940 就是这样被现场用起来的, 手册版本可能比 CNC 版本旧。
+        return (None, None)
+    if cat == "reserved":
+        return ("warn", f"{s}: 手册把 R{num} 标为保留（{name}），写进去行为未定义；"
+                        f"若现场确认已被厂商占用，按现场为准")
+    if bit is not None and not RIF.bit_ok(num):
+        return ("error", f"{s}: R{num}.{bit} 越界 —— 手册区段表写 R640 以上"
+                        f"「位存取=否」，只有 R512~R639 能按位寻址；整字读写请用 R{num}")
+    if cat == "write":
+        return (None, None)
+    return ("error", f"{s}: R{num}「{name}」手册列为阶梯只读，"
+                    f"写入会被系统覆盖或直接无效")
+
+
 def check_write(addr):
     """检查「把结果写进这个地址」是否成立。
        返回 (等级, 说明): 等级 'error' 表示写了也不生效/会撞系统, 'warn' 表示可用但要确认。"""
@@ -330,6 +365,8 @@ def check_write(addr):
                             f"先在手册确认真的是空位再用")
         return (None, None)
     if kind == "R":
+        if 512 <= num <= 1023:
+            return _check_r_iface(s, num, bit)
         tag = _dir_tag(s)
         if tag == "S":
             return ("error", f"{s}: 手册把这一位标成 S 方向(核心 -> 阶梯图)，"

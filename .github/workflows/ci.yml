@@ -63,6 +63,11 @@ jobs:
       - name: 一条 rung 多个线圈
         run: python tools/verify_multi_coil.py
 
+      # R512~R1023 的权限逐条来自手册 1-1.4.4，不是整片只读。这张表的每一格判错
+      # 都不会报错，只会在现场表现为「写的地址不生效」或「正常写法被报成错」。
+      - name: R512~R1023 逐条权限对账
+        run: python tools/verify_r_iface.py
+
       - name: 全量往返（仓库自带样本）
         run: python tools/roundtrip_full.py
 

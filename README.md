@@ -1,6 +1,6 @@
 # syntec-plc-ladder
 
-**当前版本** `v0.12.0` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+**当前版本** `v0.13.0` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
 
 > 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
 
@@ -34,6 +34,7 @@
 │   ├── syntec_paths.py               # 路径枚举：母排→负载全部通路，桥式/多负载求值
 │   ├── syntec_model.py               # 工程模型 + validate + 地址查询
 │   ├── syntec_address_db.py/.json    # 8 类元件 / 602 条标准地址 / C-S 方向 / R 区权限
+│   ├── syntec_r_iface.py             # R512~R1023 逐条权限（由手册 1-1.4.4 生成，勿手改）
 │   ├── syntec_re.py                  # 早期解码器（报告用）
 │   ├── syntec_annotation.py          # 解析编辑器导出的注解档 CUSCMT_*.dat
 │   └── build_bundle.py               # 打包单文件版
@@ -346,6 +347,8 @@ python tools/roundtrip_full.py --samples D:/my_ladder_backup
 | 单条 rung | 最多 256 行（编辑器实测 256 行可开；真机最长 59 行 / 52 分支） |
 | 间接定址 | 掩码位已定位，无实测用例 |
 | `A` 段掉电行为 | 手册只写「只有 On/Off 两态」，没写是否保持；要跨断电记住的**数值**请用 `R` 保持区 |
+| `R512~R1023` 有 86 个地址手册没定义 | **不判定**：不报错也不放行。写程序时别用，审别人的程序时用了不算错（`R938~R940` 就是现场实例）。详见 [权限表](docs/r512-r1023-权限表.md) |
+| `R961~R976`（Home Dog Shift）谁写 | 手册没写，新代工程师也没答复。按最保守假设判只读——判错只会在写的时候当场暴露 |
 
 更细的边界见 [TECHNICAL.md 第 10 节](TECHNICAL.md#10-未知与限制)。
 
@@ -358,6 +361,7 @@ python tools/roundtrip_full.py --samples D:/my_ladder_backup
 - [docs/samples.md](docs/samples.md) —— `samples/` 里每个文件验的是哪条规则
 - [docs/lad_roundtrip_report.md](docs/lad_roundtrip_report.md) —— 全量往返验证报告
 - [docs/unknown_inventory.md](docs/unknown_inventory.md) —— 未解编码清单
+- [docs/r512-r1023-权限表.md](docs/r512-r1023-权限表.md) —— R512~R1023 逐条权限（含推断依据与风险点）
 
 ## License
 

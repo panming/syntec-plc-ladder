@@ -53,15 +53,17 @@ INFER = {
     "R623~R626": ("读写", "同上"),
     "R631~R639": ("保留", "系统保留区"),
     "R700": ("只读", "合成进给速度实际值"),
-    "R831~R840": ("只读", "MLC 参数 3451~3460，参数画面设定、阶梯只读"),
+    "R831~R840": ("读写", "MLC 参数 3451~3460；手册「一般使用者就可修改」指操作工/编程工程师，"
+                   "阶梯同样可读写"),
     "R841~R844": ("只读", "轴群程序停止原因回报"),
     "R845~R850": ("保留", "保留"),
     "R851~R856": ("唯写", "个别主轴转速百分比，由阶梯设定"),
     "R861~R870": ("只读", "加工暂停点机械坐标回报"),
     "R926": ("保留", "保留"),
-    # R961~R976 手册只有一句「原点极限开关偏移量，单位 0.01 圈/0.01mm」,
-    # 没写谁写。原本按「偏移量必由阶梯设定」推成唯写, 属猜, 改标待确认。
-    "R1004": ("只读", "总工件数，核心维护"),
+    # 手册只有一句「原点极限开关偏移量，单位 0.01 圈/0.01mm」, 没写谁写,
+    # 新代工程师也答不出。按最保守的假设判只读: 判错只会「写不出去」被当场
+    # 发现, 反过来判唯写则会静默放行一次无效写入, 更难查。
+    "R961~R976": ("只读", "手册未写谁设定，新代亦未答复；按最保守假设只读"),    "R1004": ("只读", "总工件数，核心维护"),
     "R1009": ("只读", "开机时间(毫秒)，核心维护"),
 }
 
@@ -153,6 +155,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--iface", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--module", help="同时生成 src/syntec_r_iface.py")
     ap.add_argument("--lad", action="append", default=[],
                     help="附上实际用到该地址的样本程序(可多次)")
     a = ap.parse_args(argv)
@@ -246,7 +249,7 @@ def main(argv=None):
         md.append(f"| `{ad}` | {nm} | {pm} |")
     md.append("")
 
-    md.append("## 四、手册未列明的地址（视为保留）\n")
+    md.append("## 四、手册未列明的地址（不判定）\n")
     md.append(f"共 {len(missing)} 个：")
     # 压缩成区间
     runs, start = [], None
@@ -262,23 +265,36 @@ def main(argv=None):
         runs.append((start, prev))
     md.append("、".join(addr_span(s, e) for s, e in runs) + "\n")
 
+    md.append("**规则（现场确认）：未列明 ≠ 保留。**\n")
+    md.append("- 自己写程序时不要用这些地址；")
+    md.append("- 但审别人的程序时，用了也**不算问题** —— 不报错、不告警、不按「保留区」"
+              "对待。手册没定义不等于 CNC 不认，`R938~R940` 就是这么被用起来的。")
+    md.append("- 同理，手册明写 `Reserved for CNC` 的（`R519`、`R560~R579`、"
+              "`R631~R639`、`R845~R850`、`R926`）建议只给提示、不阻断：保留区被厂商"
+              "占用的先例已经有了。\n")
+
     live = [i for i in missing if i in used]
     if live:
-        md.append(f"**注意：其中 {len(live)} 个在样本程序里被用到，手册却没有定义** —— "
-                  f"{'、'.join('R%d' % i for i in live)}。")
-        md.append("要么手册版本比 CNC 版本旧，要么是厂商自定义后占用了保留区。"
-                  "工具对这几个地址不做权限判定，也不要当成保留区报错。\n")
+        md.append(f"其中 {len(live)} 个在样本程序里被用到 —— "
+                  f"{'、'.join('R%d' % i for i in live)}。这几个正是上面那条规则的由来："
+                  f"手册版本可能比 CNC 版本旧，工具不该替手册下结论。\n")
 
-    md.append("## 五、需要你确认的地方\n")
+    md.append("## 五、判断依据与风险点\n")
     md.append("判「只读」推错了会误报，程序一跑就露馅；判「可写」推错了是**静默放行**——"
-              "写进只读区不报错、只是不生效。所以这里按风险排：先列判不了的，"
-              "再列所有推断成可写的。推断成只读的不列，它们在第二节能直接看出来。\n")
+              "写进只读区不报错、只是不生效。所以这里按风险排：先列没有依据、"
+              "只能按保守方向判的，再列所有推断成可写的。推断成只读的不列，"
+              "它们在第二节能直接看出来。\n")
 
-    md.append("### 5.1 手册没写谁写，本表不判定\n")
+    md.append("### 5.1 判了但没有依据的（保守假设）\n")
+    guess = [(t, v) for t, v in INFER.items() if "保守" in v[1] or "亦未答复" in v[1]]
+    for t, (pm, why) in guess:
+        md.append(f"- `{t.replace('~R', '~R')}` 判 **{pm}** —— {why}。"
+                  f"这样判错了只会「写不出去」当场暴露；反过来判成可写，会静默放行"
+                  f"一次无效写入，事后很难查。**若现场确有阶梯写该区的证据，改回读写即可。**")
+    if guess:
+        md.append("")
     dash = sorted({i for i, (pm, sc) in perm_of.items() if sc == "待确认"})
-    if not dash:
-        md.append("无。\n")
-    else:
+    if dash:
         runs, st, pv = [], None, None
         for i in dash:
             if st is None:
@@ -376,6 +392,110 @@ def main(argv=None):
         f.write("\n".join(md) + "\n")
     print("写出 %s：%d 条，可写 %d 条，未列明 %d 个"
           % (a.out, len(rows), len(writable), len(missing)))
+
+    if a.module:
+        emit_module(a.module, perm_of, missing, rows)
+
+
+def _squash(idxs):
+    """[1,2,3,7,9,10] -> [(1,3),(7,7),(9,10)]"""
+    runs, st, pv = [], None, None
+    for i in sorted(idxs):
+        if st is None:
+            st = pv = i
+        elif i == pv + 1:
+            pv = i
+        else:
+            runs.append((st, pv)); st = pv = i
+    if st is not None:
+        runs.append((st, pv))
+    return runs
+
+
+def emit_module(path, perm_of, missing, rows):
+    """把逐条权限写成 src/syntec_r_iface.py, 让 check_write 有依据可查。
+
+    不手抄: 这张表 130 行, 手抄一遍必错几处, 而且下次改手册不会同步。
+    """
+    name_of = {}
+    for x in rows:
+        nm = NAME_FIX.get(x["addr"].replace(" ", "")) or x["name"][:40] or "未命名"
+        for i in range(x["lo"], x["hi"] + 1):
+            name_of.setdefault(i, nm)
+
+    wr = [i for i, (pm, _) in perm_of.items() if pm in ("唯写", "读写")]
+    rd = [i for i, (pm, _) in perm_of.items() if pm == "只读"]
+    rv = [i for i, (pm, _) in perm_of.items() if pm == "保留"]
+    un = sorted(set(missing))
+
+    def emit(tag, idxs, doc):
+        # 先按名称分组再压区间。只按权限压会把 590~606 合成一段, 再因为名称不同
+        # 逐条拆开 —— 结果是 R590~R599 十条一样的行, 既长又看不出是一段。
+        byname = {}
+        for i in idxs:
+            byname.setdefault(name_of.get(i, ""), []).append(i)
+        segs = [(lo, hi, nm) for nm, g in byname.items() for lo, hi in _squash(g)]
+        segs.sort()
+        out = [f"# {doc}", f"{tag} = ["]
+        for lo, hi, nm in segs:
+            out.append(f"    ({lo}, {hi}, {nm!r}),")
+        out.append("]")
+        return out
+
+    L = ["# -*- coding: utf-8 -*-",
+         '"""R512~R1023 逐条权限（1-1.4.4「接口说明」的 PLC 读写规则列）。',
+         "",
+         "本文件由 tools/gen_r_perm_table.py 生成，不要手改。",
+         "区段表 1-1.4.3 对这一段写的是「依下表定义之」——整片判只读会误报 49 条，",
+         "整片判可写会放过写状态寄存器。所以权限必须逐条查。",
+         "",
+         "四类：",
+         "  WRITE      阶梯可写（手册明写唯写/读写，或按用途推定）",
+         "  READONLY   阶梯只读（手册明写只读，或是核心回报的状态量）",
+         "  RESERVED   手册明写保留——写进去行为未定义，但只提示不阻断",
+         "  UNDEFINED  手册没定义——**不判定**。写程序时别用，审别人的程序时用了不算错，",
+         "             手册版本可能比 CNC 版本旧（R938~R940 就是实例）。",
+         '"""',
+         ""]
+    L += emit("WRITE", wr, "阶梯可写")
+    L.append("")
+    L += emit("READONLY", rd, "阶梯只读")
+    L.append("")
+    L += emit("RESERVED", rv, "手册明写保留")
+    L.append("")
+    L += emit("UNDEFINED", un, "手册未列明：不判定")
+    L += ["",
+          "# 位存取：手册区段表 1-1.4.3 —— R512~R639 可，R640 以上不可",
+          "BIT_MAX = 639",
+          "",
+          "",
+          "def _find(table, no):",
+          "    for lo, hi, nm in table:",
+          "        if lo <= no <= hi:",
+          "            return nm",
+          "    return None",
+          "",
+          "",
+          "def classify(no):",
+          '    """返回 (类别, 名称)。类别: write | readonly | reserved | undefined | unknown"""',
+          "    if not 512 <= no <= 1023:",
+          '        return ("unknown", None)',
+          '    for tag, table in (("write", WRITE), ("reserved", RESERVED),',
+          '                       ("undefined", UNDEFINED), ("readonly", READONLY)):',
+          "        nm = _find(table, no)",
+          "        if nm is not None:",
+          "            return (tag, nm)",
+          '    return ("undefined", None)      # 兜底: 宁可放过, 不乱判',
+          "",
+          "",
+          "def bit_ok(no):",
+          '    """这一段能不能按位寻址"""',
+          "    return no <= BIT_MAX",
+          ""]
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(L))
+    print("写出 %s：可写 %d 段 / 只读 %d 段 / 保留 %d 段 / 未列明 %d 个"
+          % (path, len(_squash(wr)), len(_squash(rd)), len(_squash(rv)), len(un)))
 
 
 if __name__ == "__main__":

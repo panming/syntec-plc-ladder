@@ -613,7 +613,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.12.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.13.0"},
         }
     if method == "ping":
         return {}
