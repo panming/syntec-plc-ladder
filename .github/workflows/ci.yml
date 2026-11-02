@@ -44,6 +44,11 @@ jobs:
       - name: 地址权限 / 同址驱动
         run: python tools/verify_address.py --samples samples
 
+      # 比较块两个槽位角色固定：A=常数、B=寄存器。写反不报错，但编辑器里变成
+      # 「#83 == R0」恒假条件（现场核对过）。这里盯住映射、拒绝和往返类型。
+      - name: 比较块槽位
+        run: python tools/verify_compare.py
+
       # 手动抄地址表会抄错（已经错过一次：把合并单元格解成残行，误判 R256~R511 为保留区）。
       # 这里核对 R 区段自洽、地址库同址异义；仓库不带 skill/ 与 CHM，那两项会自动跳过。
       - name: 地址三方核对

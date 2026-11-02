@@ -382,8 +382,10 @@ def el_label(el):
         sym = FB_OP_SYM.get(op, op)
         imm = op.endswith('_IMM')
         if cat == 'CMP':
-            # GTK/LTK/EQK 的第二个操作数是常数, 早期一律画成 R1, 看着像"和 R1 比较"。
-            return f"{_opnd(el[3], False)}{sym}{_opnd(el[4], op.endswith('K'))}"
+            # 比较块的槽位是固定的: 左=常数、右=寄存器。别再按 _IMM 后缀猜 ——
+            # GTK/LTK/EQK 后缀是 K 不是 _IMM, 按 _IMM 判断会把两侧都画成 R。
+            # 直接照编辑器显示: 常数在左、寄存器在右, 方向就是左 op 右。
+            return f"{_opnd(el[3], True)}{sym}{_opnd(el[4], False)}"
         if cat == 'MOVE':
             return f"R{el[4]}={_opnd(el[3], imm)}"
         return f"{_opnd(el[4], False)}{sym}{_opnd(el[3], imm)}"

@@ -63,6 +63,26 @@ def addr_number(s):
     return v
 
 
+def cmp_reg_const(reg, op, const):
+    """按「寄存器 op 常数」的自然语义生成比较块。
+
+    编辑器里 GTK/LTK/EQK 的槽位是 A=常数、B=寄存器, 比较方向就是「左 op 右」,
+    所以 GTK 的含义是「常数 > 寄存器」、LTK 是「常数 < 寄存器」。要和寄存器比,
+    方向得翻一次 —— 早期直接写 GTK/A=R83/B=#0, 到编辑器里变成
+    「#83 == R0」这种恒假条件, 一次都没生效过。
+
+        cmp_reg_const("R83", ">",  0)  -> LTK, A="#0", B="R83"   (0 < R83)
+        cmp_reg_const("R81", "<",  1)  -> GTK, A="#1", B="R81"   (1 > R81)
+        cmp_reg_const("R83", "==", 0)  -> EQK, A="#0", B="R83"
+    """
+    flip = {'>': 'LTK', 'GT': 'LTK', '<': 'GTK', 'LT': 'GTK',
+            '==': 'EQK', 'EQ': 'EQK', '=': 'EQK'}
+    if op not in flip:
+        raise ValueError(f"cmp_reg_const 不支持 op={op!r}；可选 > < == (或 GT LT EQ)")
+    return {"kind": "compare", "op": flip[op],
+            "A": "#%d" % int(const), "B": reg}
+
+
 def addr_bits(s):
     """位元件地址 -> 16 位 PLCBits 编码 (触点/线圈用)
        实测: I100=0x0064  O200=0x02C8  C36=0x0424  A302=0x092E  R44.5=0x1585
@@ -168,7 +188,22 @@ def to_enc(el):
     if k == "logic":
         return ('FB', 'LOGIC', el["op"], addr_number(el["A"]), addr_number(el["B"]))
     if k == "compare":
-        return ('FB', 'CMP', el["op"], addr_number(el["A"]), addr_number(el["B"]))
+        op = el["op"]
+        a = str(el.get("A", "")).strip()
+        b = str(el.get("B", "")).strip()
+        if op.endswith("K"):
+            # 编辑器里比较块的两个槽位角色固定: A 槽是常数, B 槽是寄存器。
+            # 写反了不会报错, 但编辑器会显示成「#83 == R0」这种恒假条件 ——
+            # 现场核对确认过, 所以这里直接拦住。
+            if not a.startswith("#"):
+                raise ValueError(
+                    f"比较块 {op}: A 槽必须是常数 (#N)，收到 {a!r}。"
+                    "编辑器把 A 当常数、B 当寄存器，且 GTK 是「常数 > 寄存器」、"
+                    "LTK 是「常数 < 寄存器」；要写「寄存器 op 常数」请用 "
+                    "cmp_reg_const(reg, op, const)")
+            if b.startswith("#"):
+                raise ValueError(f"比较块 {op}: B 槽必须是寄存器地址，收到 {b!r}")
+        return ('FB', 'CMP', op, addr_number(a), addr_number(b))
     raise ValueError(f"未知元件 kind={k!r}")
 
 

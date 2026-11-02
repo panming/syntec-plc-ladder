@@ -102,6 +102,13 @@ def el_to_dict(el):
         if mnem is None:
             return {'kind': 'raw', 'hex': L.enc_el(el).hex(' '),
                     'note': f'{cat} opcode 0x{op:02x} 无对应助记符'}
+        if cat == 'CMP':
+            # 编辑器里比较块的两个槽位是**固定角色**: A 槽=常数, B 槽=寄存器。
+            # 早期这里按 _IMM 后缀判断, 于是 GTK/LTK/EQK 的 A 被解成寄存器、B 被解成
+            # 常数, 正好反了 —— 现场核对: 写入 A=R83 B=#0, 编辑器显示 "A=#83 B=R0",
+            # 意思变成「常数 83 与寄存器 R0 比较」, 判定永远不成立。
+            return {'kind': 'compare', 'op': mnem,
+                    'A': num_to_operand(el[3], True), 'B': num_to_operand(el[4])}
         imm = mnem.endswith('_IMM')
         return {'kind': kind, 'op': mnem,
                 'A': num_to_operand(el[3], imm), 'B': num_to_operand(el[4])}
