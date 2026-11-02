@@ -119,4 +119,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # 英文版 Windows 控制台是 cp1252，打印中文会崩；显式锁成 UTF-8
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     sys.exit(main())

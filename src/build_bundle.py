@@ -132,7 +132,17 @@ def _selftest():
     return 0 if ok else 1
 
 
+def _lock_utf8():
+    # 英文版 Windows 控制台是 cp1252, 打印中文会 UnicodeEncodeError
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 if __name__ == "__main__":
+    _lock_utf8()
     if "--selftest" in sys.argv:
         sys.exit(_selftest())
     _run_server()

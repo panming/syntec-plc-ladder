@@ -10,6 +10,11 @@ jobs:
   test:
     name: ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    # Windows runner 是英文系统，控制台默认 cp1252；不设这两项，
+    # 任何打印中文的脚本都会 UnicodeEncodeError（本地中文 Windows 发现不了）。
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
     strategy:
       fail-fast: false
       matrix:

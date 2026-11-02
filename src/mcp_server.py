@@ -561,7 +561,22 @@ def _error(code, msg):
     return {"error": {"code": code, "message": msg}}
 
 
+def _force_utf8_stdio():
+    """MCP 走 stdio 传 JSON，协议规定是 UTF-8。
+
+    Windows 英文版的控制台默认 cp1252，一旦返回带中文的结果（"已添加第 N 条 rung"）
+    就会 UnicodeEncodeError 直接崩，客户端只看到「服务没响应」。
+    这里显式把三个流都锁成 UTF-8，让服务端不再依赖宿主 locale。
+    """
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    _force_utf8_stdio()
     for raw in sys.stdin:
         line = raw.strip()
         if not line:
