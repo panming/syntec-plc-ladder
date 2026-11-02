@@ -362,14 +362,19 @@ def el_label(el):
             lb = el[3] if len(el) > 3 else ''
             return f"{name} {lb}".strip()
         if cat == 'TIMER':
-            return f"TM{el[3]} K{(el[5][0] | el[5][1] << 8) if len(el) > 5 else 0}"
+            # 预设值来源有 K(常数) 和 R(寄存器) 两种, 都是同一个 opcode 家族的不同编号,
+            # 早期一律画成 K, 看到 "TM1 K82" 会误以为预设常数是 82 —— 实际是 R82。
+            src = next((s for (_p, s), t in L.TIMER_TYPE.items() if t == el[2]), 'K')
+            v = (el[5][0] | el[5][1] << 8) if len(el) > 5 else 0
+            return f"TM{el[3]} {'R' if src == 'R' else 'K'}{v}"
         if cat == 'CNTR':
             return f"CT{el[3]}"
         op = REV_NAME.get(el[2], str(el[2]))
         sym = FB_OP_SYM.get(op, op)
         imm = op.endswith('_IMM')
         if cat == 'CMP':
-            return f"{_opnd(el[3], False)}{sym}{_opnd(el[4], False)}"
+            # GTK/LTK/EQK 的第二个操作数是常数, 早期一律画成 R1, 看着像"和 R1 比较"。
+            return f"{_opnd(el[3], False)}{sym}{_opnd(el[4], op.endswith('K'))}"
         if cat == 'MOVE':
             return f"R{el[4]}={_opnd(el[3], imm)}"
         return f"{_opnd(el[4], False)}{sym}{_opnd(el[3], imm)}"

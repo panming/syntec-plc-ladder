@@ -126,6 +126,7 @@ TOOLS = [
             "  {kind:'contact_c', norm:'NO'|'NC', index:5}    // 计数器触点 CT5\n"
             "  {kind:'timer', name:'TM100', precision:'1s'|'0.1s'|'0.01s'|'0.001s', source:'K'|'R', preset:60}\n"
             "      // precision=精度; source='K' 预设常数 / 'R' 预设取寄存器(此时 preset 填寄存器号, 如 300=R300)\n"
+            "      // 要给操作员改的时间用参数区: {source:'R', preset:'R81'} = 系统参数 3401, 阶梯只读\n"
             "  {kind:'counter', name:'CT3', direction:'UP'|'DOWN'|'RESET'|'RING_UP'|'RING_DOWN', source:'K'|'R', preset:50}\n"
             "  {kind:'math', op:'ADD'|'SUB'|'MUL'|'DIV'|'ADD_IMM', A:'R200', B:'R201'}  // 语义: B = B op A\n"
             "  {kind:'move', op:'MOV'|'MOV_IMM', A:'R220', B:'R221'}      // 语义: B = A\n"
@@ -454,6 +455,9 @@ def h_explain_format(args):
         "   CT 虚拟辅助计数器 CT0~CT255 (256)   TM 虚拟辅助计时器 TM0~TM255 (256)\n"
         "   内部标志一律用 A 段; 写 R50.x 这类位置能跑, 但工具会给 warn 提示改用 A。\n"
         "   跨断电要记住的是数值, 放 R 保持区 R193~R255 (避开 R103~R192 刀号)。\n"
+        "   要给操作员改的参数(时长/间隔/次数)放 R81~R100 = 系统参数 3401~3420,\n"
+        "     掉电保持、阶梯只读: 定时器 source:'R' preset:'R81' 直接读;\n"
+        "     别写死常数, 也别写 R81(写它报 error, 改参数在参数画面 3401~3420)。\n"
         "   注意 R1033 以上 位存取=否, 不能写 R1200.0 这种。\n"
         "   查元件定义: lookup_address('A') / lookup_address('S') 直接返回手册口径。\n"
         "4. 标准地址(C/S/R) 602 条已入库, 用 lookup_address 查。\n\n"
@@ -530,7 +534,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.9.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.10.0"},
         }
     if method == "ping":
         return {}

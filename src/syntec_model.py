@@ -102,6 +102,19 @@ def _rng(what, v, hi, lo=0):
     return v
 
 
+def preset_no(v):
+    """定时器/计数器预设值的写法归一: 既接受常数 300, 也接受 'R81' / 'r81'。
+       source='R' 时写 'R81' 比写 81 好读, 但底层存的是寄存器号 81。"""
+    if isinstance(v, str):
+        s = v.strip().upper()
+        if s.startswith("R"):
+            s = s[1:]
+        if not s.isdigit():
+            raise ValueError(f"预设值 {v!r} 既不是常数也不是 R 寄存器号")
+        return int(s)
+    return int(v)
+
+
 def to_enc(el):
     k = el.get("kind")
     if k == "raw":
@@ -126,7 +139,7 @@ def to_enc(el):
         idx = _rng("定时器编号 TM", int(m.group()) if m else 0, 255)
         precision = el.get("precision", "1s")          # '1s'/'0.1s'/'0.01s'/'0.001s'
         source = el.get("source", "K")                 # 'K'=常数  'R'=寄存器
-        value = int(el.get("preset", 0))               # 常数预设值 或 寄存器号(R, 显示值即寄存器号)
+        value = preset_no(el.get("preset", 0))         # 常数预设值 或 寄存器号(R, 显示值即寄存器号)
         typ = L.TIMER_TYPE[(precision, source)]
         # 参数为 16 位小端整数: [值低字节, 值高字节, 值低字节, 0x80]
         v = _rng("定时器预设值", value, 65535)
@@ -405,9 +418,20 @@ class LadderProject:
                         lvl, msg = _check_bit_read(a)
                     if lvl and msg:
                         warns.append(f"R{ri}: {msg}")
-                if el.get("kind") == "timer":
-                    p = int(el.get("preset", 0))
-                    if not (0 <= p <= 65535):
+                if el.get("kind") in ("timer", "counter"):
+                    src = el.get("source", "K")
+                    try:
+                        p = preset_no(el.get("preset", 0))
+                    except ValueError as e:
+                        warns.append(f"R{ri}: {e}")
+                        p = None
+                    if p is not None and src == "R":
+                        z = ADB.r_zone(p)
+                        if z is None:
+                            warns.append(f"R{ri}: 预设值引用 R{p}，该编号不在 R 分配表里。")
+                        elif not z["read"]:
+                            warns.append(f"R{ri}: 预设值引用 R{p}，但「{z['note']}」阶梯只读，读不到。")
+                    elif p is not None and not (0 <= p <= 65535):
                         warns.append(f"R{ri}: 定时器预设 {p} 可能超出范围。")
         # 每行至少含一个输出元件(线圈/运算块/定时器) 或 END
         for ri, els in enumerate(self.rungs, 1):
@@ -583,6 +607,24 @@ def lookup_address(query):
         else:
             note = f"{name}；{count}；这一号手册里未定义/保留，不要拿来当标志位"
         return [(f"{letter}{num}", [note])], []
+    # R 的具体编号: 参数区要说清「谁设定、能不能写」, 其他区给权限摘要
+    m = re.match(r"^R\s*(\d+)(?:\.\d+)?$", q.upper())
+    if m and not results:
+        num = int(m.group(1))
+        if ADB.PARAM_LO <= num <= ADB.PARAM_HI:
+            no = ADB.PARAM_BASE + num - ADB.PARAM_LO
+            return [(f"R{num}",
+                     [f"系统参数传入区：对应参数 No.{no}；操作员在参数画面设定；"
+                      f"阶梯程序只读；掉电保持。程序里直接读它当预设值/判据，不要写"])], []
+        z = ADB.r_zone(num)
+        if z:
+            hint = "要存开关量标志请用 A 段" if z["note"].startswith("使用者自订") else ""
+            parts = [f"R 数据寄存器；{z['note']}；阶梯{'可写' if z['write'] else '只读'}；"
+                     f"{'可' if z['bit'] else '不能'}位存取；"
+                     f"{'掉电保持' if z['keep'] else '掉电不保持'}"]
+            if hint:
+                parts.append(hint)
+            return [(f"R{num}", ["；".join(parts)])], []
     return results[:20], panel
 
 

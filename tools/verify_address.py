@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """地址权限回归：防止把 S 段当中间继电器这条错路再溜回来。
 
-查五件事：
+查六件事：
   1. R_ZONES 是否无缝覆盖 0~65535、有没有重叠
   2. check_write 的判定是否符合手册（写 S 拒绝、写只读 R 拒绝、无位存取区拒绝，
-     A 段可写且卡在 0~511）
+     A 段可写且卡在 0~511，参数区 R81~R100 只读）
   3. validate 是否真的会拦下「写 S 段 / 写 R 位当标志」
   4. 真机语料里 S/I 段作为线圈出现了几次（应当为 0），A 段用了多少个
   5. 元件类型表是否覆盖 8 类元件
+  6. 参数区 R81~R100：映射 3401~3420、只读、定时器预设可以直接指过去
 
     python tools/verify_address.py [--samples DIR]
 """
@@ -77,6 +78,11 @@ def main():
         ("R1200.0", "error"),     # 用户区但位存取=否
         ("R8000.0", "error"),     # CNC 接口区, 只读
         ("R44.5", None),          # PLC 警报讯息区, 可写
+        ("R80", None),            # 用户区末尾: 可读写, 但不保持
+        ("R81", "error"),         # 参数传入区: 阶梯只读
+        ("R81.0", "error"),       # 参数区取位写也不行
+        ("R100", "error"),        # 参数区末位 -> 3420
+        ("R101", None),           # 刀具状态, 可写
     ]
     for addr, want in cases:
         got, msg = ADB.check_write(addr)
@@ -161,6 +167,45 @@ def main():
                   ADB.device_type("S")[0])
     ok_all &= chk("R 定义为双向沟通", "双向" in ADB.device_type("R")[0],
                   ADB.device_type("R")[2])
+
+    print()
+    print("=" * 66)
+    print(" 6. 参数区 R81~R100（对应系统参数 3401~3420）")
+    print("-" * 66)
+    ok_all &= chk("区间常量", (ADB.PARAM_LO, ADB.PARAM_HI) == (81, 100),
+                  f"R{ADB.PARAM_LO}~R{ADB.PARAM_HI} = 参数 {ADB.PARAM_BASE}~"
+                  f"{ADB.PARAM_BASE + ADB.PARAM_POINTS - 1}")
+    ok_all &= chk("映射线性（R81->3401, R100->3420）",
+                  ADB.PARAM_BASE + 81 - ADB.PARAM_LO == 3401 and
+                  ADB.PARAM_BASE + 100 - ADB.PARAM_LO == 3420)
+    for addr, want in (("R81", "3401"), ("R100", "3420")):
+        _lvl, msg = ADB.check_write(addr)
+        ok_all &= chk(f"写 {addr} 提示对应参数号", want in (msg or ""), (msg or "")[:56])
+
+    res, _p = M.lookup_address("R81")
+    ok_all &= chk("lookup R81 返回参数区说明",
+                  bool(res) and "3401" in res[0][1][0] and "只读" in res[0][1][0],
+                  res[0][1][0][:56] if res else "无结果")
+
+    # 定时器预设直接指参数区: 合法, 不该报警
+    p4 = M.LadderProject()
+    p4.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "A1"},
+                         {"kind": "timer", "name": "TM0", "precision": "0.1s",
+                          "source": "R", "preset": "R81"}])
+    p4.add_rung(elements=[{"kind": "end"}])
+    w4 = [w for w in p4.validate() if "R81" in w or "预设" in w]
+    ok_all &= chk("定时器 source=R preset='R81' 不报警", not w4,
+                  w4[0][:56] if w4 else "")
+
+    # 预设指向不存在的寄存器: 要报出来
+    p5 = M.LadderProject()
+    p5.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "A1"},
+                          {"kind": "timer", "name": "TM0", "precision": "0.1s",
+                           "source": "R", "preset": "R99999"}])
+    p5.add_rung(elements=[{"kind": "end"}])
+    w5 = [w for w in p5.validate() if "99999" in w or "分配表" in w]
+    ok_all &= chk("预设指向不存在的 R99999 会报出", bool(w5),
+                  w5[0][:56] if w5 else "无提示")
 
     print()
     print("=" * 66)

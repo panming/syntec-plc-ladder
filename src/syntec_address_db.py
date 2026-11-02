@@ -225,6 +225,18 @@ FLAG_AUX = ("A0", "A511")           # 内部标志位放这里
 FLAG_RETENTIVE = ("R193", "R255")   # 需要跨断电记住的**数值**, 放 R 保持区
                                     # (避开 R103~R192 的刀号)
 
+# 参数区: 需要「用户可调」的参数(时间/次数/位置/速度)时用这一段, 不要写死常数,
+# 也不要用 R50~R80 —— 那里掉电不保持, 一断电参数就回零了。
+# 手册 1-1.4.4 原文:
+#   "R81~R100 MLC System Parameter 由系统参数 No.3401 ~ No.3420 的 MLC 参数，
+#    以规划同一个 LADDER 可适用于不同的机器上，如换刀"
+# 方向: 操作员在参数画面设定 -> 映射到 R81~R100 -> 阶梯图只读使用, 掉电保持。
+# 定时器/计数器的预设值可以直接指过来: {"kind":"timer","source":"R","preset":"R81"}。
+PARAM_ZONE = ("R81", "R100")
+PARAM_LO, PARAM_HI = 81, 100        # 参数区的寄存器号范围
+PARAM_BASE = 3401                   # R81 <-> 参数 3401
+PARAM_POINTS = 20                   # 3401~3420
+
 # R 区权限表: (起, 止, 阶梯可读, 阶梯可写, 允许位存取, 掉电保持, 说明)
 R_ZONES = [
     (0, 39, True, False, True, False, "CNC 系统接口区"),
@@ -320,6 +332,11 @@ def check_write(addr):
                             f"阶梯只能读，写进去下一个扫描就被覆盖")
         if tag == "C":
             return (None, None)          # 手册规定的接口位, 写正是它的用途
+        if PARAM_LO <= num <= PARAM_HI:
+            return ("error",
+                    f"{s}: R{num} 是系统参数的传入区(对应参数 No.{PARAM_BASE + num - PARAM_LO})，"
+                    f"由操作员在参数画面设定，阶梯程序只读。"
+                    f"程序里直接读 R{num} 用，别写它")
         z = r_zone(num)
         if z is None:
             return ("warn", f"{s}: R{num} 不在权限表里(保留区)，行为未定义")
