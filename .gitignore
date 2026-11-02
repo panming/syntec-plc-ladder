@@ -27,3 +27,8 @@ cnc_saved.lad
 syntec_selftest*.lad
 verify_gen*.lad
 mcp_test.lad
+
+# 配套 AI 技能包：暂不随仓库发布，本地开发环境保留
+# 以后要纳入版本管理时，删掉这一行再 git add skill/
+skill/
+

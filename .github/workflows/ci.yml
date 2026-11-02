@@ -48,9 +48,15 @@ jobs:
       - name: MCP 端到端（起进程走 JSON-RPC）
         run: python tools/e2e_mcp.py
 
-      - name: 技能包独立可用
+      # 技能包目前不随仓库发布；本机开发环境才有 skill/ 目录。
+      # 有就跑一遍，没有就跳过（CI 里跑的是 clone 出来的仓库）。
+      - name: 技能包独立可用（若有）
         shell: bash
         run: |
-          python skill/syntec-plc/scripts/check_lad.py samples/B_branch.lad
-          python skill/syntec-plc/assets/build_program.py
-          python skill/syntec-plc/scripts/check_lad.py demo.lad
+          if [ -d skill/syntec-plc ]; then
+            python skill/syntec-plc/scripts/check_lad.py samples/B_branch.lad
+            python skill/syntec-plc/assets/build_program.py
+            python skill/syntec-plc/scripts/check_lad.py demo.lad
+          else
+            echo "skill/ 不存在，跳过"
+          fi

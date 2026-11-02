@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""打发布包：仓库包 + 技能包，并当场自检。
+"""打发布包，并当场自检。
 
     python tools/package.py                 # 输出到 dist/
     python tools/package.py --out ~/Desktop # 输出到指定目录
     python tools/package.py --no-verify     # 跳过解压自检
 
-产出两个 zip：
+产物：
 
-    syntec-plc-ladder-v<VER>.zip      整个仓库（不含 .git / dist / __pycache__）
-                                     里面内嵌 skill/syntec-plc.zip，拿到就能离线用
+    syntec-plc-ladder-v<VER>.zip      整个仓库（不含 .git / dist / __pycache__ / skill）
     syntec-plc-skill-v<SKILL_VER>.zip 技能包，解压到 ~/.workbuddy/skills/ 即可
+                                      仅在本地存在 skill/syntec-plc/ 时才产出
+
+技能包目前**不随仓库发布**，所以 clone 下来的仓库没有 skill/ 目录，
+脚本会跳过技能包、只出仓库包，不报错。作者的开发环境两个都出。
 
 版本号自动从源码读，不手填：
     src/build_bundle.py 的 VERSION
-    skill/syntec-plc/SKILL.md frontmatter 的 version
-两个包内容有重叠（技能包既是独立包，也内嵌在仓库包里），所以一次打完能保证一致。
+    skill/syntec-plc/SKILL.md frontmatter 的 version（有技能包时才读）
 """
 import argparse
 import hashlib
@@ -29,6 +31,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKILL_DIR = os.path.join(ROOT, "skill", "syntec-plc")
+HAS_SKILL = os.path.isdir(SKILL_DIR)
 BUNDLE = os.path.join(ROOT, "src", "build_bundle.py")
 SKILL_MD = os.path.join(SKILL_DIR, "SKILL.md")
 
@@ -47,17 +50,20 @@ def read_version():
 
 
 def read_skill_version():
+    if not os.path.isfile(SKILL_MD):
+        return None
     s = open(SKILL_MD, encoding="utf-8").read()
     head = s.split("---")[1] if s.startswith("---") else ""
     m = re.search(r"^version:\s*(\S+)", head, re.M)
     return m.group(1) if m else "0.0.0"
 
 
-def walk_files(src, skip_names=()):
+def walk_files(src, skip_names=(), exclude_dirs=()):
     """返回 [(绝对路径, 相对路径)]，跳过缓存 / 打包产物。"""
+    skip_dirs = EXCLUDE_DIRS | set(exclude_dirs)
     out = []
     for dirpath, dirnames, files in os.walk(src):
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in skip_dirs)
         for f in sorted(files):
             if os.path.splitext(f)[1].lower() in EXCLUDE_EXT:
                 continue
@@ -69,8 +75,8 @@ def walk_files(src, skip_names=()):
     return out
 
 
-def build_zip(src, prefix, out_path, extra=(), skip_names=()):
-    items = walk_files(src, skip_names)
+def build_zip(src, prefix, out_path, extra=(), skip_names=(), exclude_dirs=()):
+    items = walk_files(src, skip_names, exclude_dirs)
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for full, rel in items:
             z.write(full, f"{prefix}/{rel}")
@@ -80,9 +86,12 @@ def build_zip(src, prefix, out_path, extra=(), skip_names=()):
 
 
 def read_readme_version():
-    """README 顶部写着「MCP `vX.Y.Z`」，改了代码忘改这里，朋友看到的版本就是错的。"""
+    """README 顶部写着当前版本，改了代码忘改这里，朋友看到的版本就是错的。"""
     s = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
-    m = re.search(r"MCP `v([^`]+)`", s)
+    m = re.search(r"\*\*当前版本\*\*\s*(?:MCP\s*)?`?v([0-9][^`\s｜|]*)", s)
+    if m:
+        return m.group(1)
+    m = re.search(r"MCP `v([^`]+)`", s)   # 兼容旧写法
     return m.group(1) if m else None
 
 
@@ -158,10 +167,11 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     repo_zip = os.path.join(out_dir, f"syntec-plc-ladder-v{ver}.zip")
-    skill_zip = os.path.join(out_dir, f"syntec-plc-skill-v{sver}.zip")
-    nested = os.path.join(SKILL_DIR, "syntec-plc.zip")
+    skill_zip = os.path.join(out_dir, f"syntec-plc-skill-v{sver}.zip") if sver else None
 
-    print(f"syntec-plc-ladder  v{ver}   技能包 v{sver}")
+    head = f"syntec-plc-ladder  v{ver}"
+    head += f"   技能包 v{sver}" if sver else "   （本地无技能包，只打仓库包）"
+    print(head)
     print("-" * 66)
 
     rv = read_readme_version()
@@ -169,18 +179,23 @@ def main():
         print(f"[FAIL] README 顶部写的是 v{rv}，源码里是 v{ver} —— 先改 README")
         return 1
 
-    # 1) 技能包先打，供仓库包内嵌
-    n_skill = build_zip(SKILL_DIR, "syntec-plc", nested)
-    shutil.copyfile(nested, skill_zip)
-    os.remove(nested)
+    targets = []
 
-    # 2) 仓库包（内嵌上面那一份，保证两处内容一致）
+    # 1) 技能包（仅本地有才打；不内嵌进仓库包）
+    if sver:
+        n_skill = build_zip(SKILL_DIR, "syntec-plc", skill_zip)
+        targets.append(("技能包", skill_zip, n_skill))
+    else:
+        print("[SKIP] 没找到 skill/syntec-plc/，只打仓库包")
+
+    # 2) 仓库包：不含 skill/（技能包不随仓库发布）
     n_repo = build_zip(ROOT, "syntec-plc-ladder", repo_zip,
-                       extra=[(skill_zip, "syntec-plc-ladder/skill/syntec-plc.zip")],
-                       skip_names={"syntec-plc.zip"})
+                       skip_names={"syntec-plc.zip"},
+                       exclude_dirs={"skill"})
+    targets.insert(0, ("仓库包", repo_zip, n_repo))
 
     ok_all = True
-    for label, path, n in (("仓库包", repo_zip, n_repo), ("技能包", skill_zip, n_skill)):
+    for label, path, n in targets:
         cnt, dup, bad, nonutf8 = inspect(path)
         size = os.path.getsize(path)
         print(f"{label}  {os.path.basename(path)}")

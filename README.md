@@ -1,6 +1,8 @@
 # syntec-plc-ladder
 
-**当前版本** MCP `v0.11.1` · 技能包 `v1.4.0` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+**当前版本** `v0.11.1` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+
+> 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
 
 让 AI 读懂、修改、生成 **新代（SYNTEC）CNC 梯形图 `.lad` 文件**的 MCP 服务，
 外加一份完整的[文件格式逆向文档](TECHNICAL.md)。
@@ -9,8 +11,6 @@
   并且做到「读进来再存回去，逐字节完全一样」
 - **写**：用自然语言让 AI 拼出合法的二进制 `.lad`，用新代 PLC 编辑器打开就能看
 - **纯 Python 标准库**，零依赖，Windows / macOS / Linux 都能跑
-- **附带技能包** `skill/syntec-plc/`：把这个 MCP 用起来的「操作手册」，
-  装到 WorkBuddy 里，AI 就知道该先查地址、该怎么避开双线圈和重复元件、注释为什么要转繁体
 
 > 这个项目是**黑盒逆向**的产物：没有官方格式文档，全部规则来自
 > 「编辑器造样本 → 十六进制差分 → 全量真实程序回归验证」。
@@ -38,8 +38,7 @@
 │   └── build_bundle.py               # 打包单文件版
 ├── tools/                            # 验证脚本 + 打包脚本
 ├── samples/                          # 10 个编辑器样本 + 1 个生成的并联演示
-├── docs/                             # 逆向过程记录
-└── skill/syntec-plc/                 # AI 技能包：让 AI 会写新代 PLC
+└── docs/                             # 逆向过程记录
 ```
 
 ---
@@ -123,55 +122,18 @@ python tools/selftest.py
 
 ---
 
-## 给 AI 用的技能包（`skill/syntec-plc/`）
+## 配套技能包（暂未随仓库发布）
 
 MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力**。
-同一个工具，AI 可能写出「一个 `O` 挂三个线圈」，也可能拿 `C` 段当中间继电器用——
-这两类错都能生成合法文件，到现场才炸。
+同一个工具，AI 可能写出「一个 `O` 挂三个线圈」，也可能拿 `R` 的位当中间继电器——
+这两类错都能生成**语法合法**的文件，到现场才炸。
 
-`skill/syntec-plc/` 就是补这部分：把「怎么写才对」固化下来。
+配套技能包就是补这部分：把「怎么写才对」固化下来——硬约束表、8 类元件分工、
+12 个已验证的机床工艺模式、注释编码规则、强制三层验证流程。
 
-### 里面有什么
-
-```
-skill/syntec-plc/
-├── SKILL.md                        # 工作流 + 硬约束 + 反模式清单
-├── references/
-│   ├── address-map.md              # 8 类元件表 + C/S 全表(各 512 点) + R 分配与权限 + 参数区
-│   ├── element-grammar.md          # add_rung 的完整元件语法、地址规则、定时器 K 值换算
-│   ├── patterns.md                 # 12 个机床工艺模式（启保停/自动手动/锁存报警/单次动作/互锁…）
-│   ├── lad-format.md               # 字节结构速查，排错用
-│   └── comment-encoding.md         # cp950 规则 + 简繁对照表
-├── scripts/
-│   ├── check_lad.py                # 字节级体检，纯 stdlib，不依赖仓库
-│   └── zh_tw.py                    # 简体转繁体 + cp950 可编码性检查
-└── assets/
-    └── build_program.py            # 离线生成模板（含扫描级仿真器）
-```
-
-`SKILL.md` 是入口，其余按需加载——AI 只在用到时才读对应的 reference，不占上下文。
-
-### 怎么装
-
-WorkBuddy 的技能目录是 `~/.workbuddy/skills/`（用户级，所有项目可用）
-或项目内的 `.workbuddy/skills/`（跟仓库走）。
-
-```bash
-# 方式一（推荐）：从仓库直接复制，内容永远和代码同步
-cp -r skill/syntec-plc ~/.workbuddy/skills/
-
-# 方式二：用打包好的 zip（Release 里下载，或自己打一份）
-unzip syntec-plc-skill-v1.4.0.zip -d ~/.workbuddy/skills/
-
-# 自己打包（仓库根目录执行，同时产出仓库包和技能包）
-python tools/package.py
-```
-
-装完后重启会话，技能列表里会出现 `syntec-plc`。
-
-> MCP 和技能是**两件独立的事**，要分别装：
-> MCP 给工具，技能给方法。只装技能不装 MCP，AI 会被技能明确告知
-> 「不要手搓字节，先让用户安装 MCP」；只装 MCP 不装技能，AI 有工具但缺判断。
+> **当前状态**：技能包 `v1.4.0` 已完成并在作者本机使用，但**没有随本仓库发布**，
+> `git clone` 下来看不到 `skill/` 目录。等它定稿后会单独放到 Release，
+> 届时这里会补上安装命令。本文下面的坑位表说明它具体挡什么。
 
 ### 它挡掉了哪些坑
 
@@ -291,7 +253,7 @@ set SYNTEC_SAMPLES=D:/my_lad
 真机程序是可选的，缺失只记 SKIP。
 
 推上去之后，GitHub Actions 会在 **Ubuntu / Windows × Python 3.10 / 3.12** 上
-跑同一套脚本（`.github/workflows/ci.yml`），外加「技能包单独解压也能用」的检查。
+跑同一套脚本（`.github/workflows/ci.yml`）。
 
 ---
 
@@ -304,16 +266,19 @@ python tools/package.py                  # 产物出到 dist/
 python tools/package.py --out ~/Desktop  # 出到桌面，方便发给别人
 ```
 
-两个 zip：
+发出去的是 `dist/` 下的 zip：
 
 | 文件 | 内容 |
 |---|---|
-| `syntec-plc-ladder-v<ver>.zip` | 整个仓库（不含 `.git` / `dist` / `__pycache__`），内嵌技能包 |
-| `syntec-plc-skill-v<ver>.zip` | 技能包单独分发，解压到 `~/.workbuddy/skills/` |
+| `syntec-plc-ladder-v<ver>.zip` | 整个仓库（不含 `.git` / `dist` / `__pycache__`），拿到就能跑 |
 
-版本号分别读 `src/build_bundle.py` 的 `VERSION` 和 `SKILL.md` 的 `version`，不用手填。
+版本号读 `src/build_bundle.py` 的 `VERSION`，不用手填。
 打完会解压到临时目录实跑两遍：`--selftest` 和 `tools/e2e_mcp.py`——
 **zip 打得开不算数，能从压缩包里起服务、写文件、读回来才算**。
+
+> 如果本地存在 `skill/syntec-plc/`（作者的开发环境才有），脚本会额外出一个
+> `syntec-plc-skill-v<ver>.zip`。`git clone` 下来的仓库没有这个目录，脚本会跳过，
+> 只出上面那一个包——不会报错。
 
 > zip 里的中文文件名按 UTF-8 记录（`0x800` 标志）。Windows 资源管理器、7-Zip、
 > macOS 归档工具都正常；Git Bash 自带的老版 Info-ZIP `unzip`（6.00, 2009）不认这个标志，

@@ -1043,7 +1043,7 @@ export SYNTEC_SAMPLES=D:/my_lad          # Windows: set SYNTEC_SAMPLES=D:/my_lad
 ## 附录 C：地址段与权限（C / S / R）
 
 > 依据《CNC and PLC Interface-ZH-CN》1-1.1（C Bit）、1-1.2（S Bit）、1-1.4.3（R 资源分配表）。
-> 完整表见 `skill/syntec-plc/references/address-map.md`，由 `tools/chm_to_md.py` 从 CHM 直接抽取。
+> 完整地址表在 `src/syntec_address_db.json`（602 条），也可用 `tools/chm_to_md.py` 从 CHM 直接再抽一份。
 
 ### C.1 三个方向
 
