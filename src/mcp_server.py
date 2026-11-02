@@ -233,6 +233,25 @@ TOOLS = [
         },
     },
     {
+        "name": "explain_rung",
+        "description": (
+            "解释一条 rung 到底在什么条件下才动作 —— 逐个负载给出布尔表达式。\n"
+            "做法是从左母排出发, 把通往每个线圈/运算块的所有通路都走一遍, "
+            "取 OR-of-AND; 不做串并联约简, 所以桥式跨接和「一条 rung 多个线圈」也能算。\n"
+            "用途: 看懂别人的程序、确认某个输出为什么不动、核对多负载的条件是不是想要的那个。\n"
+            "注意: 表达式里的 + 是或、· 是与、前缀 / 是常闭; 线圈本身不会出现在条件里。"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": ".lad 文件路径"},
+                "rung": {"type": "integer", "description": "rung 序号 (1 基)"},
+                "row": {"type": "integer", "description": "或改用编辑器行号定位"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "explain_format",
         "description": "返回已逆向验证的 .lad 格式要点与已知限制, 供 AI 编写前参考(哪些块已支持、哪些待验证)。",
         "inputSchema": {"type": "object", "properties": {}},
@@ -307,10 +326,14 @@ def h_read_ladder(args):
     if fmt in ("json", "both"):
         brief = []
         for r in sel:
-            brief.append({"rung": r['index'], "row": f"{r['row_start']}-{r['row_end']}",
-                          "ok": r['ok'],
-                          "elements": r['elements'] if r['ok'] else None,
-                          **({"note": r['note']} if not r['ok'] else {})})
+            item = {"rung": r['index'], "row": f"{r['row_start']}-{r['row_end']}",
+                    "ok": r['ok'], "shape": r.get('shape'),
+                    "elements": r['elements'] if r['ok'] else None}
+            if not r['ok']:
+                item["note"] = r['note']
+            if r.get('loads'):          # 折不成树的 rung: 每个负载的使能条件
+                item["loads"] = r['loads']
+            brief.append(item)
         out.append(json.dumps(brief, ensure_ascii=False, indent=1))
     if len(info['rungs']) > (sel[-1]['index'] if sel else 0):
         out.append(f"... 共 {info['rung_count']} 条, 用 start/end/limit 查看更多")
@@ -423,6 +446,57 @@ def h_save(args):
             f"(请用新代 PLC 编辑器打开核对; 控制器实际加载路径为 DiskC\\OpenCNC\\Ladder\\cnc.lad)")
 
 
+def h_explain_rung(args):
+    path = args.get("path")
+    if not path or not os.path.exists(path):
+        return f"文件不存在: {path}"
+    import syntec_parse as P
+    import syntec_paths as PA
+
+    info = RD.read_ladder(path)
+    want_rung = args.get("rung")
+    want_row = args.get("row")
+    hit = None
+    for r in info['rungs']:
+        if want_rung is not None and r['index'] == int(want_rung):
+            hit = r
+            break
+        if want_row is not None and r['editor_row_start'] <= int(want_row) <= r['editor_row_end']:
+            hit = r
+            break
+    if hit is None:
+        return (f"没找到 rung={want_rung} row={want_row}; "
+                f"该文件共 {info['rung_count']} 条 rung")
+
+    logic, _others, _tail = RD.split_records(open(path, 'rb').read())
+    rows = [P.decode_row(x) for x in logic]
+    res = PA.analyze(rows, hit['row_start'] - 1, hit['row_end'] - 1)
+
+    out = [f"rung {hit['index']}  (编辑器行 {hit['editor_row_start']}-{hit['editor_row_end']}, "
+           f"shape={hit.get('shape')}, {res['n_edges']} 个元件, 枚举 {res['n_paths']} 条通路)"]
+    if not res['loads']:
+        out.append("这条 rung 没有输出元件（空白行或只有流程块）。")
+        return "\n".join(out)
+
+    for L in res['loads']:
+        out.append("")
+        out.append(f"  {L['addr']}  ←  {L['text']}")
+        out.append(f"      {L['n_paths']} 条通路" +
+                   ("，接不到左母排（永远不会动作）" if L['unreachable'] else ""))
+        if len(L['terms']) > 1:
+            for k, t in enumerate(L['terms'], 1):
+                out.append(f"        通路{k}: {PA.term_text(t) or '（无条件）'}")
+        if L['through']:
+            out.append(f"      途经: {'、'.join(L['through'])} —— 串联的负载不阻断电流，"
+                       f"后面的元件每个扫描都执行")
+        if L['dead']:
+            out.append(f"      另有 {len(L['dead'])} 条通路恒假（同路既有 A 又有 /A），已剔除")
+
+    out.append("")
+    out.append("（表达式: + 是或、· 是与、前缀 / 是常闭。线圈本身不参与条件。）")
+    return "\n".join(out)
+
+
 def h_explain_format(args):
     return (
         "【能力总览】\n"
@@ -504,6 +578,7 @@ TOOL_HANDLERS = {
     "validate": h_validate,
     "preview": h_preview,
     "save": h_save,
+    "explain_rung": h_explain_rung,
     "explain_format": h_explain_format,
 }
 
@@ -538,7 +613,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.11.1"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.12.0"},
         }
     if method == "ping":
         return {}

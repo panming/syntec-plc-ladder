@@ -31,6 +31,8 @@ def parse_addr(s):
     """返回 (kind, value)。
        kind: 'IMM'(立即数 #N) | 'NUM'(纯数字) | 字母(I/O/C/S/A/R/TM/CT...)
        value: 数字或字符串(字母+数字, 如 'I132' / 'C36' / 'R600.1')
+
+    注意: 位地址(R590.17)走了 float, 拿它算位号会错 —— 见 split_addr。
     """
     s = str(s).strip()
     if s.startswith('#'):
@@ -45,6 +47,28 @@ def parse_addr(s):
         return ('NUM', int(s))
     except ValueError:
         raise ValueError(f"无法解析地址: {s!r}")
+
+
+_ADDR_RE = re.compile(r'^([A-Za-z]+)\s*(\d+)(?:\.(\d+))?$')
+
+
+def split_addr(s):
+    """'R590.17' -> ('R', 590, 17);  'R590' -> ('R', 590, None);  '#5' -> ('IMM', 5, None)
+
+    位号必须逐字符解析, 不能走 float:
+        (590.17 - 590) * 10 = 1.7000000000000455   -> round -> 2   位号 17 变 2
+        (44.11  - 44)  * 10 = 1.1000000000000014   -> round -> 1   R44.11 变 R44.1
+    .11~.31 里只有 .10/.20/.30 侥幸正确, 其余全错。读取方向用整数运算, 一直没问题,
+    所以这个错只在"生成"时出现 —— 写出来文件能打开、能编译, 就是不监视原来那个点。
+    """
+    s = str(s).strip()
+    if s.startswith('#'):
+        return ('IMM', int(s[1:]), None)
+    m = _ADDR_RE.match(s)
+    if not m:
+        raise ValueError(f"无法解析地址: {s!r}")
+    return (m.group(1).upper(), int(m.group(2)),
+            int(m.group(3)) if m.group(3) is not None else None)
 
 
 DEV_INDEX = {"I": 0, "O": 1, "C": 2, "S": 3, "A": 4}
@@ -87,14 +111,10 @@ def addr_bits(s):
     """位元件地址 -> 16 位 PLCBits 编码 (触点/线圈用)
        实测: I100=0x0064  O200=0x02C8  C36=0x0424  A302=0x092E  R44.5=0x1585
        R 寄存器位为 n4<<12 | ((号-(n4-1)*128)<<5 | 位), n4 = 号//128+1"""
-    kind, val = parse_addr(s)
-    if kind in ('IMM', 'NUM'):
-        return val
-    if isinstance(val, float):
-        base = int(val)
-        bit = int(round((val - base) * 10))
-    else:
-        base, bit = int(val), 0
+    kind, base, bit = split_addr(s)
+    if kind == 'IMM':
+        return base
+    bit = bit or 0
     if kind in DEV_INDEX:
         # 编号只有 9 位, 超出会被 & 0x1FF 静默截断 (I600 -> I88)。宁可报错。
         if not 0 <= base <= 511:
@@ -292,12 +312,10 @@ def to_rung_bytes(els, left_anchor=None):
 # ----------------------------------------------------------------------------
 def _check_bit_read(addr):
     """读触点时的地址检查。S/C 只读没问题, 但 R 的位不是每个区都能取。"""
-    kind, val = parse_addr(addr)
+    kind, base, bit = split_addr(addr)
     if kind != 'R':
         return (None, None)
-    base = int(val)
-    bit = 0 if isinstance(val, int) else int(round((val - base) * 10))
-    if bit == 0 and isinstance(val, int):
+    if bit is None:
         return (None, None)          # 整字访问, 不涉及位存取
     z = ADB.r_zone(base)
     if z is None:
@@ -436,15 +454,18 @@ class LadderProject:
                     a = el.get("addr")
                     if a is None:
                         continue
-                    kind, val = parse_addr(a)
+                    try:
+                        kind, base, _bit = split_addr(a)
+                    except ValueError:
+                        continue
                     if kind in ('I', 'O', 'C', 'S', 'A'):
-                        if isinstance(val, int) and not (0 <= val <= 511):
+                        if not (0 <= base <= 511):
                             warns.append(f"R{ri}: 地址 {a} 超出 0~511 范围。")
                     elif kind == 'R':
-                        if isinstance(val, int) and not (0 <= val <= 65535):
+                        if not (0 <= base <= 65535):
                             warns.append(f"R{ri}: 寄存器 {a} 超出 0~65535 范围。")
                     elif kind in ('TM', 'CT'):
-                        if isinstance(val, int) and not (0 <= val <= 255):
+                        if not (0 <= base <= 255):
                             warns.append(f"R{ri}: {a} 超出 0~255 范围。")
                     # 地址权限: 写 S 段 / 写只读 R 区 / 位存取非法
                     if el.get("kind") == "coil":

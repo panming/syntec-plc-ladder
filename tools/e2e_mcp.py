@@ -7,7 +7,7 @@
 
 查五件事：
   1. initialize 返回 serverInfo（名字 + 版本）
-  2. tools/list 返回 12 个工具，且工具描述里没有开发者本机路径
+  2. tools/list 返回 13 个工具，且工具描述里没有开发者本机路径
   3. 完整写一份程序：new → add_rung → validate → save → load_lad 读回
   4. 写 S 段会被 validate 拦下（语义检查真的生效，不是写着好看）
   5. 同一地址两处置位/复位会被报「重复元件」
@@ -27,7 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXPECT_TOOLS = {
     "new_ladder", "load_lad", "read_ladder", "dump_rungs", "lookup_address",
     "add_rung", "set_comment", "add_comment_line", "validate", "preview",
-    "save", "explain_format",
+    "save", "explain_rung", "explain_format",
 }
 
 NO = lambda a: {"kind": "contact", "norm": "NO", "addr": a}          # noqa: E731
@@ -120,7 +120,7 @@ def main():
 
     tools = resp.get(id_tools, {}).get("result", {}).get("tools", [])
     names = {t.get("name") for t in tools}
-    chk("tools/list 返回 12 个工具", names == EXPECT_TOOLS,
+    chk("tools/list 返回 13 个工具", names == EXPECT_TOOLS,
         f"{len(names)} 个" + ("" if names == EXPECT_TOOLS else f"；差异 {names ^ EXPECT_TOOLS}"))
     blob = json.dumps(tools, ensure_ascii=False)
     # 只查「是不是把开发者本机路径固化进工具描述了」，不需要知道那是谁

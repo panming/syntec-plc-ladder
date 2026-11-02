@@ -412,7 +412,7 @@ def dev_name(n):
         if t < 5:
             return f"{DEV_LETTER[t]}{n3 & 0x1FF}"
         return f"?{t}:{n3 & 0x1FF}"
-    if 1 <= n4 <= 5:
+    if 1 <= n4 <= 15:                # n4 是 4 位: 6..15 覆盖 R640~R2047
         return f"R{(n3 >> 5) + (n4 - 1) * 128}.{n3 & 0x1F}"
     return f"?BIT{n:04X}"
 

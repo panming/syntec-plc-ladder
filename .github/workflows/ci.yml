@@ -54,6 +54,15 @@ jobs:
       - name: 地址三方核对
         run: python tools/verify_addr_conflicts.py
 
+      # 路径枚举是用来顶替树模型盲区的（桥式跨接、一条 rung 多个负载）。
+      # 它必须先在「树能表达的那 300 多条」上和树模型逐条对齐，否则它在剩下
+      # 那些行上的结论没有可信度。
+      - name: 路径枚举 vs 串并联树
+        run: python tools/verify_paths.py
+
+      - name: 一条 rung 多个线圈
+        run: python tools/verify_multi_coil.py
+
       - name: 全量往返（仓库自带样本）
         run: python tools/roundtrip_full.py
 

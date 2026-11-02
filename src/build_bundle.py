@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-把 mcp_server.py + 三个依赖模块打包成 **单文件** 可执行脚本。
+把 mcp_server.py + 依赖模块打包成 **单文件** 可执行脚本。
 
 产物: dist/syntec-ladder-mcp-standalone.py
 用途: 发给别人时只需传一个 .py 文件, 对方配置里指向它即可, 不用管目录结构。
@@ -24,9 +24,9 @@ OUT = (os.path.join(ROOT, "syntec-ladder-mcp-standalone.py") if _IN_SRC
        else os.path.join(HERE, "dist", "syntec-ladder-mcp-standalone.py"))
 
 MODULES = ["syntec_re", "syntec_lad", "syntec_layout", "syntec_address_db",
-           "syntec_model", "syntec_parse", "syntec_read"]
+           "syntec_model", "syntec_parse", "syntec_paths", "syntec_read"]
 
-VERSION = "0.11.5"
+VERSION = "0.12.0"
 
 HEADER = '''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-

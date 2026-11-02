@@ -17,6 +17,7 @@ import syntec_re as R
 import syntec_lad as L
 import syntec_parse as P
 import syntec_layout as Y
+import syntec_paths as PA
 
 DEV = "IOCSA"
 
@@ -39,7 +40,7 @@ def bits_to_addr(n):
         if t < 5:
             return f"{DEV[t]}{n3 & 0x1FF}"
         return f"#{n}"
-    if 1 <= n4 <= 5:
+    if 1 <= n4 <= 15:            # n4 是 4 位: 1..5 = R0~R639, 6..15 = R640~R2047
         base = (n3 >> 5) + (n4 - 1) * 128
         bit = n3 & 0x1F
         # 这一区永远是按位寻址的, bit=0 也照样显示 .0 —— 位设备里 "R50" 和
@@ -221,13 +222,27 @@ def read_ladder(path):
                'editor_row_end': b + 1 + erow[b]}
         if node is None:
             if why == 'blank':
-                rec.update(elements=None, ok=True, why='空白行',
+                rec.update(elements=None, ok=True, why='空白行', shape='blank',
                            note='空白行(无元件), 原样保留')
             else:
+                # 折不成树的行照样能读: 用路径枚举把每个负载的使能条件算出来。
+                # 这样"桥式/多负载"不再是审查盲区, 只是不能写回(布局还原不了)。
+                res = PA.analyze(rows, a, b)
+                loads = [{'addr': x['addr'], 'row': x['row'], 'col': x['col'],
+                          'text': x['text'], 'n_paths': x['n_paths'],
+                          'through': x['through'],
+                          'unreachable': x['unreachable']}
+                         for x in res['loads']]
+                multi = len(loads) > 1
                 rec.update(elements=None, ok=False, why=why,
-                           note=f'{why} —— 无法写成串并联树, 保存时原样保留')
+                           shape='multi' if multi else 'bridge',
+                           loads=loads,
+                           note=('%d 个负载共用一个条件段 —— 可读取、可审查, '
+                                 '保存时原样保留' % len(loads)) if multi else
+                                f'{why} —— 可读取、可审查, 保存时原样保留')
         else:
-            rec.update(elements=tree_to_elements(node), ok=True, why=None)
+            rec.update(elements=tree_to_elements(node), ok=True, why=None,
+                       shape='tree', loads=None)
         rungs.append(rec)
 
     stats = {'par': 0, 'branches': 0, 'max_branch': 0}
