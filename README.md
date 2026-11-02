@@ -1,6 +1,6 @@
 # syntec-plc-ladder
 
-**当前版本** `v0.13.1` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+**当前版本** `v0.13.2` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
 
 > 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
 
@@ -154,7 +154,9 @@ MCP 只提供**能力**（读写 `.lad` 的 13 个工具），不给**判断力*
 | 地址表抄错（把 `R256~R511` 当保留区、把两列权限看反） | `verify_addr_conflicts.py` 拿手册逐行对账；`tools/chm_to_md.py` 按 `rowspan` 展开，不靠手抄 |
 | 轴号拼字符串没补零（`R71` 当 `R701`） | `verify_addr_conflicts.py` + `verify_review_fixes.py` 锁住 `R701~R716` / `R901~R916` |
 | 文本图把 `=R590.14` 砍成 `=R590.1`，五个位看着像一个 | `render_file` 整份图统一列宽；`verify_review_fixes.py` 回归 |
-| 报警文字写了、线圈没接，屏幕上永远不弹 | `verify_alarm_xml.py` 拿 `AlarmPLC_CHS.xml` 和梯形图对账 |
+| 报警文字与线圈对不上（含删逻辑后留下的文字残留） | `verify_alarm_xml.py` 拿 `AlarmPLC_CHS.xml` 和梯形图对账；只列事实，不判「保护失效」 |
+| 把串联定时器/运算块当恒通，下游条件少一个 AND 项 | 手册 1-2.10 / 1-2.7：定时器到时、运算为真才导通；`verify_series_blocks.py` 用真值表锁住 |
+| `R40~R49` 警报输出位没线圈，被误报成悬空触点 | 手册 1-5：警报未启用属正常，工具降为提示 |
 | 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |
 
 ---
@@ -277,8 +279,9 @@ python tools/verify_addr_conflicts.py --chm "CNC and PLC Interface-ZH-CN.chm"   
 python tools/verify_paths.py                    # 路径枚举 vs 串并联树
 python tools/verify_multi_coil.py               # 一条 rung 多个线圈
 python tools/verify_r_iface.py                  # R512~R1023 逐条权限
-python tools/verify_review_fixes.py             # 审查工具自身的四个历史缺陷回归
+python tools/verify_review_fixes.py             # 审查工具自身的六个历史缺陷回归
 python tools/verify_alarm_xml.py --selftest     # 报警 XML 对账（合成用例）
+python tools/verify_series_blocks.py            # 串联功能块是条件（真值表）
 python tools/review_ladder.py 我的程序.lad       # 静态体检一份现成程序
 python tools/verify_alarm_xml.py --lad 我的程序.lad   # 同目录要有 AlarmPLC_CHS.xml
 

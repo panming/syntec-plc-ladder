@@ -487,8 +487,8 @@ def h_explain_rung(args):
             for k, t in enumerate(L['terms'], 1):
                 out.append(f"        通路{k}: {PA.term_text(t) or '（无条件）'}")
         if L['through']:
-            out.append(f"      途经: {'、'.join(L['through'])} —— 串联的负载不阻断电流，"
-                       f"后面的元件每个扫描都执行")
+            out.append(f"      途经: {'、'.join(L['through'])} —— 这些功能块是条件："
+                       f"只有定时器到时 / 运算为真，后面的负载才导通")
         if L['dead']:
             out.append(f"      另有 {len(L['dead'])} 条通路恒假（同路既有 A 又有 /A），已剔除")
 
@@ -613,7 +613,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.13.1"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.13.2"},
         }
     if method == "ping":
         return {}

@@ -12,12 +12,16 @@
 所以逻辑值 = 所有通路的 OR-of-AND。串并联树只是这种「通路集合」的一种压缩写法
 (`(A∥B)→C` 写成 `(A+B)·C`), 压不下去的时候, 回到通路列表就永远有答案。
 
-求值模型的三条约定 (每一条都对应一类真实故障):
+求值模型的四条约定 (每一条都对应一类真实故障):
   * 元件边只能从**左端子流向右端子**。竖线/横线是等电位点, 由并查集合并。
     允许反向穿行会把 `/A18` 当成从右往左导通, 凭空多出通路。
-  * 比较块(CMP)是**条件**, 不是负载 —— 它本身不驱动任何东西。
-  * 线圈和运算块是**负载**, 是通路终点, 绝不参与条件。把 `=C1` 算进 R590.17 的
-    条件里, 就成了「C1 亮着 R590.17 才亮」, 与真实逻辑完全无关。
+  * 比较块(CMP)是**条件**, 不是负载 —— 结果为真才导通 (手册 1-2.7)。
+  * 功能块(定时器/计数器/算术/搬移/逻辑运算)是 **gate**: 它自己是被驱动的负载,
+    但对下游而言是**条件** —— 只有定时器到达设定时间 (手册 1-2.10「输出讯号为 ON」)
+    或运算导通之后, 后面的负载才得电。旧版把串联功能块当恒通, 等于少算一个 AND 项。
+  * 线圈是**负载**, 是通路终点, 不进入条件。把 `=C1` 算进 R590.17 的条件里,
+    就成了「C1 亮着 R590.17 才亮」, 与真实逻辑完全无关。
+    线圈串在中间的情形手册未明说, 暂按恒通, 不假装已经求证。
 """
 import syntec_parse as P
 import syntec_layout as Y
@@ -30,20 +34,30 @@ _COND_TAGS = ('CONTACT', 'CONTACT_T', 'CONTACT_C', 'RAW')
 
 
 def kind_of(el):
-    """元件分类: 'cond' 条件 / 'load' 负载 / 'other' 流程块等。
-    RAW 归条件 —— 读不懂的单元, 当作"可能导通也可能断开", 至少不会丢通路。"""
+    """元件分类: 'cond' 条件 / 'gate' 串联功能块 / 'load' 负载 / 'other' 流程块。
+
+    gate 是 2026-11-02 现场纠正后新增的类别: 定时器/运算块既是被驱动的负载,
+    又对下游构成条件。手册 1-2.10「定时器到达设定时间时输出讯号为 ON」、
+    1-2.7「比较结果为真时输出讯号为 ON」—— 都不是一条直通线。
+    RAW 归条件 —— 读不懂的单元, 当作"可能导通也可能断开", 至少不会丢通路。
+    """
     t = el[0]
     if t in _COND_TAGS:
         return 'cond'
     if t == 'COIL':
         return 'load'
     if t == 'FB':
-        return 'cond' if el[1] == 'CMP' else 'load'
-    return 'other'                      # END / RTS / FEND / JSR / LAB ...
+        if el[1] == 'CMP':
+            return 'cond'
+        if el[1] == 'FLOW':
+            return 'other'              # FEND / END / JSR / LAB / RTS, 不参与求值
+        return 'gate'                   # TIMER / CNTR / MATH / MOVE / LOGIC
+    return 'other'
 
 
 def literal(el):
-    """触点 -> (地址键, 是否取反)。用来查「同一项里 A 与 /A 同时出现」= 恒假。"""
+    """元件 -> (键, 是否取反)。用来查「同一项里 A 与 /A 同时出现」= 恒假,
+    也用作真值表的变量键。功能块用 '@标签' 做键, 不与触点地址冲突。"""
     t = el[0]
     if t == 'CONTACT':
         return (Y.dev_name(el[2]), el[1] == 'NC')
@@ -51,6 +65,8 @@ def literal(el):
         return (f'TM{el[2]}', el[1] == 'NC')
     if t == 'CONTACT_C':
         return (f'CT{el[2]}', el[1] == 'NC')
+    if t == 'FB':
+        return ('@' + Y.el_label(el), False)
     return None
 
 
@@ -177,17 +193,22 @@ def term_of(path, edges):
     条件按元件去重: 串联两个一模一样的触点等于一个 (A·A = A)。不去重的话
     渲染出来是 `A282·/A193·/A193·A190`, 而矛盾检测又按"同地址正负都出现"
     判恒假, 两个 /A193 会被误认成 /A193·A193 —— 白报一堆死项。
+
+    串在前面的功能块 (gate) 要算进条件: 下游负载只有在它导通时才得电。
+    旧版把它只记进 through (视为恒通), 求出来的表达式会少一个 AND 项。
     """
     conds, through, seen = [], [], set()
     for k in path:
         e = edges[k]
-        if e['kind'] == 'cond':
+        if e['kind'] in ('cond', 'gate'):
             if e['el'] in seen:
                 continue
             seen.add(e['el'])
             conds.append(e['el'])
         elif e['kind'] == 'load':
             through.append(e['el'])
+        if e['kind'] == 'gate':
+            through.append(e['el'])       # 仍列出「途经」, 供上层提示用
     return tuple(conds), tuple(through)
 
 
@@ -212,7 +233,7 @@ def analyze(rows, r0, r1, max_paths=MAX_PATHS):
       loads: [{'el','addr','row','col','terms','text','through','dead',
                'n_paths','unreachable'}]
         terms      保序 tuple 列表, 外层 OR 内层 AND
-        through    通路上穿过的其它负载 (串联负载, 电流要流过去才算)
+        through    通路上串着的其它功能块/负载 (gate 同时是下游负载的条件)
         dead       被判为恒假而丢掉的项 (通常是有 A 又有 /A)
         unreachable 一条通路都没有 -> 这个负载悬空
       notes: 结构层面值得提醒的话
@@ -230,7 +251,7 @@ def analyze(rows, r0, r1, max_paths=MAX_PATHS):
         return out
 
     for k, e in enumerate(edges):
-        if e['kind'] != 'load':
+        if e['kind'] not in ('load', 'gate'):
             continue
         paths, trunc = enumerate_paths(g, e['u'], max_paths)
         out['truncated'] = out['truncated'] or trunc

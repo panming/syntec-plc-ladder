@@ -16,7 +16,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(_HERE)
 OUT = os.path.join(ROOT, "验证结果.txt")
-VER = "0.13.1"
+VER = "0.13.2"
 
 SECTIONS = [
     ("端到端自检", ["tools/selftest.py"], "写 -> 存 -> 读 -> 再存, 逐项核对"),
@@ -30,8 +30,9 @@ SECTIONS = [
     ("R512~R1023 逐条权限", ["tools/verify_r_iface.py"], ""),
     ("路径枚举 vs 串并联树", ["tools/verify_paths.py"], ""),
     ("一条 rung 多个线圈", ["tools/verify_multi_coil.py"], ""),
-    ("审查工具自身回归", ["tools/verify_review_fixes.py"], "标签截断/轴向地址/悬空误报/warn 措辞"),
+    ("审查工具自身回归", ["tools/verify_review_fixes.py"], "标签截断/轴向地址/悬空误报/warn 措辞/警报位"),
     ("报警定义 XML 对账", ["tools/verify_alarm_xml.py", "--selftest"], "合成用例"),
+    ("串联功能块是条件", ["tools/verify_series_blocks.py"], "定时器/运算块导通才有下游，含真值表"),
     ("MCP 端到端", ["tools/e2e_mcp.py"], "起进程走 JSON-RPC"),
     ("单文件版自检", ["syntec-ladder-mcp-standalone.py", "--selftest"], "打包产物独立可用"),
 ]

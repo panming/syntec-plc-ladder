@@ -15,6 +15,7 @@ import collections
 import io
 import json
 import os
+import re
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -185,6 +186,18 @@ def externally_driven(addr):
     return bool(res and res[0] == "error" and "只读" in res[1])
 
 
+def is_alarm_bit(addr):
+    """R40~R49 是 PLC 警报/警告输出位 (手册 1-5.21 / 1-5.22)。
+
+    R40~R43 = 系统内定警报(编号 1~64)，R44~R49 = 自订警报/警告。
+    这些位按手册是「PLC 输出」，由阶梯程序线圈驱动后控制器才弹警报窗口。
+    全文没有线圈可能只是该警报在这台机上未启用，不能和普通悬空触点
+    一样当成「结构错误」—— 2026-11-02 现场确认 R43.0 / R44.5 属此情形。
+    """
+    m = re.match(r"^R(\d+)\.(\d+)$", str(addr).upper())
+    return bool(m and 40 <= int(m.group(1)) <= 49)
+
+
 class Report:
     def __init__(self):
         self.items = []
@@ -297,14 +310,23 @@ def main():
         base = reg.split(".")[0]
         for bit in range(32):
             driven.add(f"{base}.{bit}")
-    dangling = []
+    dangling, alarm_unused = [], []
     for a, uses in sorted(contacts.items()):
         if a in driven or externally_driven(a):
             continue
-        dangling.append(f"`{a}` 被当作触点用了 {len(uses)} 次（rung {fmt(sorted({r for _, r in uses}))}），"
-                        f"但全文没有任何一处驱动它")
+        line = (f"`{a}` 被当作触点用了 {len(uses)} 次"
+                f"（rung {fmt(sorted({r for _, r in uses}))}），"
+                f"但全文没有任何一处驱动它")
+        (alarm_unused if is_alarm_bit(a) else dangling).append(line)
     for x in dangling:
         rep.add("警告", x)
+    if alarm_unused:
+        rep.add("提示", f"{len(alarm_unused)} 个 PLC 警报输出位没有线圈驱动",
+                "\n".join(alarm_unused) + "\n"
+                "手册 1-5：R40~R43 是系统内定警报、R44~R49 是自订警报，"
+                "由阶梯程序线圈驱动后控制器才弹警报窗口。\n"
+                "若该警报在本机未启用（现场已确认不影响程序正确性），属正常；"
+                "否则要补上驱动它的检测逻辑。工具只列事实，不判对错。")
 
     # 5 比较块槽位：带 K 的 op，A 必须是常数、B 必须是寄存器
     CMP_NAME = {0x5e: "GT", 0x62: "LT", 0x66: "EQ",
@@ -389,10 +411,10 @@ def main():
                 "如果是有意的（比如「总是允许」），可以忽略；"
                 "上升沿/置位线圈没有条件是有意义的，不在此列")
     if through:
-        rep.add("提示", f"{len(through)} 个负载的上游串着另一个负载",
-                "串联的定时器/运算块**不会阻断**它后面的元件 —— "
-                "电流仍然流过去，后面的输出每个扫描都执行。\n"
-                "想等它完成，要用它的触点（TMxx / 输出位），不能靠串联。\n"
+        rep.add("提示", f"{len(through)} 个负载的上游串着功能块",
+                "串联的定时器/运算块是**条件**，不是直通线（手册 1-2.10 / 1-2.7）："
+                "只有定时器到达设定时间、或比较/运算结果为真时，才导通后面的负载。\n"
+                "路径枚举已把这些块算进下游负载的条件里；这是正常的顺序控制写法，不是错误。\n"
                 "涉及行 " + fmt(sorted({e for e, _a, _t in through})))
 
     # 9 输出点使用情况

@@ -68,13 +68,19 @@ jobs:
       - name: R512~R1023 逐条权限对账
         run: python tools/verify_r_iface.py
 
-      # 2026-11-02 审另一台机 cnc.lad 时暴露的四个工具缺陷：标签截断、
-      # 轴向表地址没补零、只读位误报悬空、warn 措辞一刀切。
+      # 2026-11-02 审另一台机 cnc.lad 时暴露的六个工具缺陷：标签截断、
+      # 轴向表地址没补零、只读位误报悬空、warn 措辞一刀切、
+      # 警报输出位误当悬空触点、串联功能块误当恒通。
       - name: 审查工具回归
         run: python tools/verify_review_fixes.py
 
       - name: 报警定义 XML 对账（含合成自检）
         run: python tools/verify_alarm_xml.py --selftest
+
+      # 串联定时器/运算块是条件，不是直通线：手册 1-2.10「到达设定时间时输出讯号为 ON」、
+      # 1-2.7「比较结果为真时输出讯号为 ON」。旧版当恒通会让下游负载少一个 AND 项。
+      - name: 串联功能块语义
+        run: python tools/verify_series_blocks.py
 
       - name: 全量往返（仓库自带样本）
         run: python tools/roundtrip_full.py

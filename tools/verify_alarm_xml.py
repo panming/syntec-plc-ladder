@@ -4,13 +4,24 @@
 
 新代机床的报警文字放在 Ladder/AlarmPLC_CHS.xml（CHT/COM 是其它语系），
 一条消息用 Content 里的 (R44.5) 标出对应的报警位。只有阶梯里真的有线圈
-去驱动这个位，屏幕上才可能弹出那条消息。两边对不上就有两类问题：
+去驱动这个位，屏幕上才可能弹出那条消息。两边对不上就有两类情况：
 
-  * 有文字、没人点  —— 报警永远不会弹（现场以为有保护，其实没有）
+  * 有文字、没人点  —— 该编号的警报讯息不会被触发；也可能是删掉程序逻辑后
+    留下的文字残留（文字由 MLCEdit 单独维护，删逻辑不一定会删文字）
   * 点了、没文字    —— 屏幕上只有编号或空白占位
 
-另外把「两条不同位写着一模一样的文字」列出来：通常是复制粘贴后漏改地址，
-其中一条是废件。
+手册依据 (PLC Editor Manual-ZH-CN.chm 第 1-5 章):
+  * 1-5.21    R40~R43 = 系统内定警报(编号 1~64)，文字在控制器里，不在 XML。
+  * 1-5.22    R44~R49 = 自订警报；R44.0~R44.15 对应 Alarm 65~80，
+              R44.16~R44.31 对应 Warning 315~330。Alarm/Warning 必须自保。
+  * 1-5.22.49 WinCE 10.114.46 以后按语系读三份之一：
+              CHS=AlarmPLC_CHS.xml / CHT=AlarmPLC_CHT.xml / COM=AlarmPLC_COM.xml
+              所以「控制器读哪份」取决于控制器语系，不是三份同时生效。
+  * 1-5       PLC 发出警报只在屏幕显示字符串，不会自动中止任何动作；
+              要停加工/主轴，必须在 PLC 程序里另行处理。
+
+另外把「两条不同位写着一模一样的文字」列出来：可能是报警位迁移后留下的
+旧条目，哪条在用要现场确认，工具不替它下结论。
 
 用法：
     python tools/verify_alarm_xml.py --lad cnc.lad [--xml AlarmPLC_CHS.xml]
@@ -116,9 +127,11 @@ def report(res, title):
           (res["n_def"], res["driven_ok"]))
     print()
     if res["dead"]:
-        print("[!] 有文字、阶梯却没人驱动（报警永远不会弹）: %d 条" % len(res["dead"]))
+        print("[·] 有报警文字、阶梯里没有驱动这个位: %d 条" % len(res["dead"]))
         for a, i, t in res["dead"]:
             print("    %-9s #%-4d %s" % (a, i, t))
+        print("    注: 文字由 MLCEdit 单独维护, 删掉程序逻辑不一定会删文字;")
+        print("        也可能是该警报在本机未启用。是否要处理请现场确认。")
         print()
     if res["undefined"]:
         print("[!] 阶梯驱动了、XML 却没有对应文字: %d 条" % len(res["undefined"]))
@@ -126,7 +139,7 @@ def report(res, title):
             print("    %s" % a)
         print()
     if res["duplicate"]:
-        print("[!] 同一个文字挂在多个位上（多半是复制粘贴漏改地址）: %d 组" %
+        print("[·] 同一个文字挂在多个位上（可能是迁移后留下的旧位）: %d 组" %
               len(res["duplicate"]))
         for t, addrs in res["duplicate"]:
             print("    %s  <-  %s" % (t[:46], "、".join(addrs)))

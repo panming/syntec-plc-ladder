@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""回归：2026-11-02 审 cnc.lad(80KB 版) 时查出的 4 个工具缺陷。
+"""回归：2026-11-02 审 cnc.lad(80KB 版) 时查出的 6 个工具缺陷。
 
 1. render_line 把 8 字符标签砍成 7 字符（=R590.14 显示成 =R590.1）
 2. AXIAL 里 R7{i} / R9{i} 没补零，lookup('R73') 谎报成「轴3速度」
 3. 悬空触点检查把参数区只读位 R100.2 误报成「没人驱动」
 4. 所有 warn 一律写成「手册标保留」
+5. R40~R49 警报输出位没线圈时被当成普通悬空触点报「警告」
+6. 把串联定时器/运算块说成「不阻断、后面每个扫描都执行」(语义反了)
 
 用法: python tools/verify_review_fixes.py
 """
@@ -89,6 +91,20 @@ def main():
     chk("保留措辞归 reserved", RV.warn_kind("手册把 R926 标为保留（Reserved）") == "reserved")
     chk("未知编号归 unknown", RV.warn_kind("这个编号地址库里没有") == "unknown")
     chk("输入点归 input", RV.warn_kind("I 是物理输入点，写它不会改变现场信号") == "input")
+
+    # ---- 5 警报输出位不与普通悬空触点混为一谈 ----
+    # 手册 1-5：R40~R49 是 PLC 输出位，没有线圈可能只是该警报未启用。
+    # 2026-11-02 现场确认 R43.0 / R44.5 属此情形, 不影响程序正确性。
+    chk("R43.0 是警报位", RV.is_alarm_bit("R43.0"))
+    chk("R44.5 是警报位", RV.is_alarm_bit("R44.5"))
+    chk("R44.14 是警报位", RV.is_alarm_bit("R44.14"))
+    chk("R50.0 不是警报位", not RV.is_alarm_bit("R50.0"))
+    chk("R590.1 不是警报位", not RV.is_alarm_bit("R590.1"))
+    rv_src = open(os.path.join(_HERE, "review_ladder.py"), encoding="utf-8").read()
+    chk("警报位单独成节且只报提示",
+        "alarm_unused" in rv_src and 'rep.add("提示", f"{len(alarm_unused)}' in rv_src)
+    chk("不再宣称串联功能块不阻断",
+        "不会阻断" not in rv_src and "每个扫描都执行" not in rv_src)
 
     bad = [c for c in CHECKS if not c[1]]
     for name, ok, detail in CHECKS:
