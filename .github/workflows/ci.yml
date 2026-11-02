@@ -44,6 +44,11 @@ jobs:
       - name: 地址权限 / 同址驱动
         run: python tools/verify_address.py --samples samples
 
+      # 手动抄地址表会抄错（已经错过一次：把合并单元格解成残行，误判 R256~R511 为保留区）。
+      # 这里核对 R 区段自洽、地址库同址异义；仓库不带 skill/ 与 CHM，那两项会自动跳过。
+      - name: 地址三方核对
+        run: python tools/verify_addr_conflicts.py
+
       - name: 全量往返（仓库自带样本）
         run: python tools/roundtrip_full.py
 

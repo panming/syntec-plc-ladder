@@ -1,6 +1,6 @@
 # syntec-plc-ladder
 
-**当前版本** `v0.11.2` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+**当前版本** `v0.11.3` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
 
 > 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
 
@@ -131,7 +131,7 @@ MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力*
 配套技能包就是补这部分：把「怎么写才对」固化下来——硬约束表、8 类元件分工、
 12 个已验证的机床工艺模式、注释编码规则、强制三层验证流程。
 
-> **当前状态**：技能包 `v1.4.0` 已完成并在作者本机使用，但**没有随本仓库发布**，
+> **当前状态**：技能包 `v1.7.0` 已完成并在作者本机使用，但**没有随本仓库发布**，
 > `git clone` 下来看不到 `skill/` 目录。等它定稿后会单独放到 Release，
 > 届时这里会补上安装命令。本文下面的坑位表说明它具体挡什么。
 
@@ -148,6 +148,7 @@ MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力*
 | 一个地址挂多个线圈（含多个置位/多个复位） | 「普通线圈 1 处、置位/复位各 1 处」，`validate` 报双线圈 / 重复元件 |
 | 注释用简体，编辑器显示问号 | `zh_tw.py` + 前置检查 |
 | 地址超 511 被静默截断 | 硬约束表写明，工具已改为直接报错 |
+| 地址表抄错（把 `R256~R511` 当保留区、把两列权限看反） | `verify_addr_conflicts.py` 拿手册逐行对账；`tools/chm_to_md.py` 按 `rowspan` 展开，不靠手抄 |
 | 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |
 
 ---
@@ -242,6 +243,8 @@ python tools/verify_samples.py                  # 元件逐字节验证
 python tools/verify_parallel.py                 # 并联结构验证
 python tools/verify_comments.py                 # 注释编码验证(自带样例 + 真机语料)
 python tools/verify_address.py                  # 地址权限 / 同址驱动回归
+python tools/verify_addr_conflicts.py           # 手册/文档/代码 三方地址核对
+python tools/verify_addr_conflicts.py --chm "CNC and PLC Interface-ZH-CN.chm"   # 连手册一起查
 
 # 换成自己的样本目录
 python tools/roundtrip_full.py --samples D:/my_lad

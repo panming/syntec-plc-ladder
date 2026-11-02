@@ -30,6 +30,9 @@ MARK_C = ("<!-- BEGIN C -->", "<!-- END C -->")
 MARK_S = ("<!-- BEGIN S -->", "<!-- END S -->")
 MARK_R = ("<!-- BEGIN R -->", "<!-- END R -->")
 
+# rowspan 带下来的格子加这个前缀, 用来区分「手册合并」和「手册本来就这么写」
+INHERIT = "\x01"
+
 
 # --------------------------------------------------------------------------
 # CHM -> html
@@ -53,28 +56,79 @@ def decompile(chm, outdir):
 # html 表格 -> 行
 # --------------------------------------------------------------------------
 class TableRows(HTMLParser):
+    """把 <table> 解成二维网格，**按 rowspan / colspan 展开**。
+
+    手册的 R 分配表用 rowspan 表达「这一段与上一段共用同一个说明和权限」：
+    R103~R255 的说明/宏程序/阶梯/位存取四格是 rowspan=2，一直盖到 R256~R511。
+    不展开就只能拿到一个 td 的残行，之前正是把残行当成「手册未列明」，
+    进而把 R256~R511（实际是使用者自订、可读可写可位）误判成保留区。
+    按 HTML 的本义展开，比按位置猜或留空都可靠。
+    """
+
     def __init__(self):
         super().__init__()
-        self.rows, self._row, self._cell = [], None, None
+        self.rows = []          # 展开后的网格
+        self._raw = []          # [(text, rowspan, colspan), ...]
+        self._row, self._cell, self._attrs = None, None, {}
+
+    @staticmethod
+    def _span(v):
+        try:
+            return max(1, int(str(v).strip()))
+        except (TypeError, ValueError):
+            return 1
 
     def handle_starttag(self, tag, attrs):
+        a = {k.lower(): v for k, v in attrs}
         if tag == "tr":
             self._row = []
         elif tag in ("td", "th") and self._row is not None:
-            self._cell = []
+            self._cell, self._attrs = [], a
 
     def handle_endtag(self, tag):
         if tag in ("td", "th") and self._cell is not None:
-            self._row.append(re.sub(r"\s+", " ", "".join(self._cell)).strip())
+            text = re.sub(r"\s+", " ", "".join(self._cell)).strip()
+            self._row.append((text, self._span(self._attrs.get("rowspan")),
+                              self._span(self._attrs.get("colspan"))))
             self._cell = None
         elif tag == "tr" and self._row is not None:
             if self._row:
-                self.rows.append(self._row)
+                self._raw.append(self._row)
             self._row = None
+        elif tag == "table":
+            self._expand()
 
     def handle_data(self, data):
         if self._cell is not None:
             self._cell.append(data)
+
+    def _expand(self):
+        """把 _raw 展开成矩形网格；跨行格子在后续行按列位置继承。
+
+        继承来的格子加 INHERIT 前缀，好让下游知道「这一格是 rowspan 带下来的」，
+        而不是手册真的在下一行重写了一遍。
+        """
+        grid, pend = [], {}          # pend: col -> [文本, 剩余行数]
+        for cells in self._raw:
+            line, col = {}, 0
+            for text, rs, cs in cells:
+                while pend.get(col, [None, 0])[1] > 0:
+                    line[col] = INHERIT + pend[col][0]
+                    pend[col][1] -= 1
+                    col += 1
+                for k in range(cs):
+                    line[col + k] = text
+                    if rs > 1:
+                        pend[col + k] = [text, rs - 1]
+                col += cs
+            while pend.get(col, [None, 0])[1] > 0:
+                line[col] = INHERIT + pend[col][0]
+                pend[col][1] -= 1
+                col += 1
+            width = max(line) + 1 if line else 0
+            grid.append([line.get(i, "") for i in range(width)])
+        self.rows = grid
+        self._raw = []
 
 
 def read_table(path):
@@ -121,6 +175,7 @@ def collapse(rows, letter):
         pending.clear()
 
     for r in rows:
+        r = [c.lstrip(INHERIT) for c in r]      # C/S 表无合并, 这里只是兜底
         addr = r[0].strip()
         if not re.match(r"^[CS]?\d", addr.replace("~", "").replace(" ", "")
                         or "x") and not re.match(r"^[CS]", addr):
@@ -148,26 +203,43 @@ def md_table(rows):
 
 
 def md_r_table(rows):
-    """R 分配表: 编号 | 说明 | 阶梯可读 | 阶梯可写 | 位存取 | 掉电保持"""
-    lines = ["| 编号 | 说明 | 阶梯读 | 阶梯写 | 位存取 | 掉电保持 |",
+    """R 分配表。
+
+    列名照手册原文：第 3 列是「宏程序或人机界面」、第 4 列才是「阶梯程序」。
+    这两列权限并不总是相同（例如 R8000~R8255 宏程序读/写、阶梯只读），
+    把第 3 列写成「阶梯读」会让人以为阶梯能读能写，正好反过来。
+    """
+    lines = ["| 编号 | 说明 | 宏程序/人机界面 | 阶梯程序 | 位存取 | 掉电保持 |",
              "|---|---|---|---|---|---|"]
+    seen, dup = set(), []
     for r in rows:
-        cells = [c for c in r]
-        if not re.match(r"^R\d", cells[0]):
+        cells = [c.lstrip(INHERIT) for c in r]
+        merged = [c.startswith(INHERIT) for c in r]
+        if not cells or not re.match(r"^R\d", cells[0]):
             continue
-        # 手册里 R40~R49 / R256~R511 / R640~R1023 这几行是合并单元格，
-        # 解出来的 HTML 只剩 1~2 个 td。不知道缺的是哪一列，就整行标"未列明"，
-        # 不要按位置瞎补 —— 补错比留空更糟。
-        if len(cells) < 6:
-            note = cells[1] if len(cells) > 1 else "—"
-            if note in ("是", "否"):
-                note = "（未列说明）"      # 只剩一个权限值, 分不清是哪一列
-            lines.append("| `%s` | %s | 手册此行未列明 | — | — | — |"
-                         % (cells[0], note))
-            continue
+        cells += [""] * (6 - len(cells))
+        merged += [False] * (6 - len(merged))
+        addr = cells[0].replace("|", "\\|")
+        # 只有「单点编号重复」才是排版错。R2050~R2090 这种重复是手册有意列的
+        # 条件行（Pr3810=0 / Pr3810=1 两种权限），不能当成错误。
+        if "~" not in cells[0]:
+            if cells[0] in seen:
+                dup.append(cells[0])
+            seen.add(cells[0])
         note = cells[1].replace("|", "\\|") or "—"
+        if merged[1]:
+            # 这一格的说明是上一行 rowspan 带下来的。照抄会让 R256~R511 读起来像
+            # 「刀号区」（它继承的是 R103~R255 那句），只保留主句并标明来源。
+            note = note.split(" (")[0].split("（")[0] + "（手册与上一行合并成一格）"
+        vals = [("—" if not c.strip() else c.strip()) for c in cells[2:6]]
         lines.append("| `%s` | %s | %s | %s | %s | %s |"
-                     % (cells[0], note, cells[2], cells[3], cells[4], cells[5]))
+                     % (addr, note, vals[0], vals[1], vals[2], vals[3]))
+    if dup:
+        uniq = "、".join(sorted(set(dup)))
+        lines += ["",
+                  "> ⚠️ 手册原文里 `%s` 出现了两次（编号重复，两个名称不同），"
+                  "抽取按原样保留、没有替你选一个 —— 这是排版错，"
+                  "在厂商确认前这一格别当用户区用。" % uniq]
     return "\n".join(lines)
 
 

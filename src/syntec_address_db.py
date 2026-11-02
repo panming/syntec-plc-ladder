@@ -246,10 +246,14 @@ R_ZONES = [
     (101, 102, True, True, True, True, "刀具状态(存于 IO 卡)"),
     (103, 255, True, True, True, True,
      "使用者自订(R103~R192 铣床刀号 T1~T90; 存于 IO 卡)"),
-    # 手册这两行是残缺的合并单元格, 只知道「不是给用户的」; 按最保守处理: 读可以, 写不行
-    (256, 511, True, False, False, False, "保留区(手册未列明)"),
+    # 手册 1-1.4.3 的表里 R256~R511 与 R103~R255 是**同一格**（rowspan=2）:
+    # 说明/宏程序/阶梯/位存取四列都继承 R103~R255 = 读/写、位存取=是,
+    # 只有「永久保存」不同（这一段是"否"）。按残行当"未列明保留区"是错的 ——
+    # 那会让 R300 这种正常用法被工具报 error。
+    (256, 511, True, True, True, False, "使用者自订(与 R103~R255 同一格, 不保持)"),
     (512, 639, True, False, True, False, "CNC 系统接口区"),
-    (640, 1023, True, False, False, False, "保留区(含 R1000 计数等系统量, 阶梯只读)"),
+    (640, 1023, True, False, False, False,
+     "CNC 系统接口区(与 R512~R639 同一格; 位存取=否, 含 R1000 计数等系统量)"),
     (1024, 1032, True, True, False, False, "铣床自动分中/对刀占用"),
     (1033, 2049, True, True, False, False, "使用者自订"),
     (2050, 2090, True, True, False, False,
@@ -346,10 +350,12 @@ def check_write(addr):
         if bit is not None and not z["bit"]:
             return ("error", f"{s}: R{num} 所在的「{z['note']}」不支持位存取，"
                             f"不能用 R{num}.{bit}，改用 A 段虚拟辅助接点")
-        if bit is not None and z["note"] == "使用者自订":
-            # 能写, 但不是这个元件的正经用途。只对「纯用户自订、可位存取」这一段提示:
+        if bit is not None and z["note"].startswith("使用者自订"):
+            # 能写, 但不是这个元件的正经用途。只对「用户自订、可位存取」的段提示:
             # R4x.y 是警报位、R600.x / R612.x 是手册规定的标准接口位, 那里取位正是
-            # 正确用法, 提示了反而是噪音。
+            # 正确用法, 提示了反而是噪音。用 startswith 而不是相等, 因为同一段的
+            # note 后面会挂括号说明(R103~R255 的刀号、R256~R511 的合并格来源),
+            # 用相等会让 R300.0 这种漏掉提示, 与 R50.0 不一致。
             return ("warn", f"{s}: 能写，但 R 是数据寄存器；内部中间继电器请用 "
                             f"A 段 ({FLAG_AUX[0]}~{FLAG_AUX[1]})，R 留在数值和与核心交换的数据")
         return (None, None)
