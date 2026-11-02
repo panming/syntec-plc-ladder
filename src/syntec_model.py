@@ -547,6 +547,11 @@ def lookup_address(query):
     """返回 (results, panel) 二元组。
        results: [(地址, [含义, ...]), ...]  panel: [(功能名, 说明), ...]"""
     q = query.strip()
+    # 只给一个字母/短代号: 回答「这类元件是干什么的、有多少点」。AI 常常先问这个。
+    dt = ADB.device_type(q)
+    if dt:
+        name, spec, count = dt
+        return [(q.upper(), [f"{name}；{spec}；{count}"])], []
     # 直接是地址
     direct = ADB.lookup(q.upper())
     if direct:
@@ -568,6 +573,16 @@ def lookup_address(query):
     for fn, desc in ADB.PANEL_FUNCTIONS.items():
         if q in fn or q in desc:
             panel.append((fn, desc))
+    # 兜底: 查的是「某段的一个具体编号」, 但地址库里没这条标准含义
+    m = re.match(r"^(A|I|O|C|S)\s*(\d+)$", q.upper())
+    if m and not results:
+        letter, num = m.group(1), int(m.group(2))
+        name, spec, count = ADB.device_type(letter)
+        if letter in ("A", "I", "O"):
+            note = f"{name}；{count}；这一号手册没有固定含义，用户可以自由使用"
+        else:
+            note = f"{name}；{count}；这一号手册里未定义/保留，不要拿来当标志位"
+        return [(f"{letter}{num}", [note])], []
     return results[:20], panel
 
 
@@ -576,7 +591,7 @@ if __name__ == "__main__":
     p.add_rung(condition=[{"kind": "contact", "norm": "NO", "addr": "I132"}],
                action=[{"kind": "coil", "norm": "NO", "addr": "O10"}])
     p.add_rung(condition=[{"kind": "contact", "norm": "NC", "addr": "C36"}],
-               action=[{"kind": "coil", "norm": "LATCH", "addr": "R50"}])
+               action=[{"kind": "coil", "norm": "LATCH", "addr": "A0"}])
     p.add_rung(condition=[{"kind": "contact", "norm": "NO", "addr": "I100"}],
                action=[{"kind": "timer", "name": "TM100", "preset": 60}])
     p.add_rung(elements=[{"kind": "end"}])

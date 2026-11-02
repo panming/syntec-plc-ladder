@@ -26,7 +26,7 @@ OUT = (os.path.join(ROOT, "syntec-ladder-mcp-standalone.py") if _IN_SRC
 MODULES = ["syntec_re", "syntec_lad", "syntec_layout", "syntec_address_db",
            "syntec_model", "syntec_parse", "syntec_read"]
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 HEADER = '''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-

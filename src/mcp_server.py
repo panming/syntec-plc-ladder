@@ -118,8 +118,9 @@ TOOLS = [
             "  1) 传 condition(串联条件, 从左往右) + action(结果元件, 从条件右侧往右);\n"
             "  2) 直接传 elements: 按视觉从左到右排列的完整元件列表。\n"
             "元件格式(对象):\n"
-            "  {kind:'contact', norm:'NO'|'NC', addr:'I132'}              // 触点, addr 可为 I/O/C/S/A/R + 数字\n"
-            "      // 位元件 0..511; S 段是 CNC->PLC 只读接口(如 S0=加工中), 只能当触点\n"
+            "  {kind:'contact', norm:'NO'|'NC', addr:'I132'}              // 触点, addr 可为 I/O/A/C/S/R + 数字\n"
+            "      // 位元件 0..511; S 段是核心->阶梯图的只读状态(如 S0=加工中), 只能当触点;\n"
+            "      // 中间继电器用 A 段(A0~A511), 不要拿 R 的位当标志\n"
             "  {kind:'coil', norm:'NO'|'NC'|'RP'|'FP'|'LATCH'|'UNLATCH', addr:'O10'}\n"
             "  {kind:'contact_t', norm:'NO'|'NC', index:27}   // 定时器触点 TM27\n"
             "  {kind:'contact_c', norm:'NO'|'NC', index:5}    // 计数器触点 CT5\n"
@@ -441,13 +442,20 @@ def h_explain_format(args):
         "       0.01s: K 0xc3 / R 0xe2  0.001s: K 0xc2 / R 0xe7\n"
         "   - 计数器(8字节): UP 0xc6/0xe5 DOWN 0xc7/0xe6 RESET 0xc9 RING_UP 0xe0/0xe9 RING_DOWN 0xe1/0xea\n"
         "   - 流程: JMP 0xca / JSR 0xcb / MSG 0xd4 / LAB 0xd5 / RTS 0xd0 / END 0xcf / FEND 0xfd\n"
-        "【地址段: 方向决定能不能写】\n"
-        "   I 物理输入 (现场接线决定)    O 物理输出 (程序写)\n"
-        "   C PLC->CNC 系统命令(512点, 如 C0 起动/C36 急停/C6 X轴JOG+) —— 能写, 但每个点接内核\n"
-        "   S CNC->PLC 系统状态(512点, 如 S0 加工中/S1 暂停/S32 Reset/S33 NC Ready) —— 只读, 不能写线圈\n"
-        "   R 数据寄存器; 内部标志位只能放 R 的位:\n"
-        "       过程量 R50.0~R80.15 (掉电不保持)      跨断电 R193.0~R255.15 (保持, 避开R103~R192刀号)\n"
-        "       注意 R1033 以上 位存取=否, 不能写 R1200.0 这种\n"
+        "【8 类元件: 先认元件, 再挑地址】\n"
+        "   I 实体输入接点(Input)      O 实体输出接点(Output)\n"
+        "   A 虚拟辅助接点(Auxiliary) A0~A511 共512 —— 中间继电器/过程标志就放这里\n"
+        "   C 阶梯图发送指令给核心    C0~C511 共512(如 C0 起动/C36 急停/C6 X轴JOG+)\n"
+        "                             —— 能写, 但每个点都接内核, 不是自由内存\n"
+        "   S 核心传送系统状态给阶梯图 S0~S511 共512(如 S0 加工中/S1 暂停/S32 Reset)\n"
+        "                             —— 只读, 不能写线圈\n"
+        "   R 阶梯图与核心双向沟通    32 位元寄存器, 可存数值或拆开成位元使用\n"
+        "                             R0~R65535 —— 用来存数, 不是继电器\n"
+        "   CT 虚拟辅助计数器 CT0~CT255 (256)   TM 虚拟辅助计时器 TM0~TM255 (256)\n"
+        "   内部标志一律用 A 段; 写 R50.x 这类位置能跑, 但工具会给 warn 提示改用 A。\n"
+        "   跨断电要记住的是数值, 放 R 保持区 R193~R255 (避开 R103~R192 刀号)。\n"
+        "   注意 R1033 以上 位存取=否, 不能写 R1200.0 这种。\n"
+        "   查元件定义: lookup_address('A') / lookup_address('S') 直接返回手册口径。\n"
         "4. 标准地址(C/S/R) 602 条已入库, 用 lookup_address 查。\n\n"
         "【并联(竖线)编码 —— 已对 1188 条真实 rung 全量验证】\n"
         "   连接字节 4 位 = 前后两条列边界上的竖线: bit2/bit3 = 左边界上/下半段, bit0/bit1 = 右边界上/下半段。\n"
@@ -470,7 +478,8 @@ def h_explain_format(args):
         "  - JMP/MSG/ROT 能读能原样保留, 但还没有生成参数 (用 raw 形式)。\n\n"
         "【写入前的自检】\n"
         "  validate 会查出: 末行无 END / 地址越界 / 只有条件无输出 / 双线圈 / 定时器重号 / 计数器重号\n"
-        "                  / 写 S 段(只读) / 写只读 R 区 / R 位存取非法。\n"
+        "                  / 写 S 段(只读) / 写 A512 以上 / 写只读 R 区 / R 位存取非法\n"
+        "                  / 拿 R50.x 当中间继电器(warn, 建议改 A)。\n"
         "  双线圈在编辑器打开时同样会报警, 且实际只有一处生效 —— 务必先改掉再保存。\n"
     )
 
@@ -521,7 +530,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.8.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.9.0"},
         }
     if method == "ping":
         return {}

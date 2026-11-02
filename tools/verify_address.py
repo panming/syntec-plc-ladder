@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""地址权限回归：防止把 S 段当中间继电器这类错误再溜回来。
+"""地址权限回归：防止把 S 段当中间继电器这条错路再溜回来。
 
-查四件事：
+查五件事：
   1. R_ZONES 是否无缝覆盖 0~65535、有没有重叠
-  2. check_write 的判定是否符合手册（写 S 拒绝、写只读 R 拒绝、无位存取区拒绝）
-  3. validate 是否真的会拦下「写 S 段」的程序
-  4. 真机语料里 S/I 段作为线圈出现了几次（应当为 0）
+  2. check_write 的判定是否符合手册（写 S 拒绝、写只读 R 拒绝、无位存取区拒绝，
+     A 段可写且卡在 0~511）
+  3. validate 是否真的会拦下「写 S 段 / 写 R 位当标志」
+  4. 真机语料里 S/I 段作为线圈出现了几次（应当为 0），A 段用了多少个
+  5. 元件类型表是否覆盖 8 类元件
 
     python tools/verify_address.py [--samples DIR]
 """
@@ -62,10 +64,16 @@ def main():
         ("S32", "error"),
         ("I0", "warn"),           # 物理输入, 写无意义
         ("O0", None),
+        ("A0", None),             # 虚拟辅助接点: 内部标志的正经落点
+        ("A511", None),           # 段尾
+        ("A512", "error"),        # 9 位编号上限
         ("C36", None),            # 已知系统命令, 允许写
-        ("R50.0", None),          # 用户区 + 可位存取
+        ("R50.0", "warn"),        # 能写, 但 R 是数据寄存器 -> 提示改用 A
+        ("R50", None),            # 整字写是 R 的正经用途
         ("R210.1", None),         # 用户区(保持)
         ("R30", "error"),         # CNC 接口区只读
+        ("R600.1", None),         # 手册标的 C 方向接口位(区段表判只读, 知识库纠正)
+        ("R610.1", "error"),      # 手册标的 S 方向接口位, 只读
         ("R1200.0", "error"),     # 用户区但位存取=否
         ("R8000.0", "error"),     # CNC 接口区, 只读
         ("R44.5", None),          # PLC 警报讯息区, 可写
@@ -90,12 +98,20 @@ def main():
     p2.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "I0"},
                           {"kind": "coil", "norm": "LATCH", "addr": "R50.0"}])
     p2.add_rung(elements=[{"kind": "end"}])
-    clean = [w for w in p2.validate() if "R50" in w or "S 段" in w]
-    ok_all &= chk("写 R50.0 不报警", not clean, str(clean) if clean else "")
+    got = [w for w in p2.validate() if "R50" in w]
+    ok_all &= chk("写 R50.0 不报错, 但提示改用 A 段",
+                  len(got) == 1 and "A 段" in got[0], got[0][:60] if got else "无提示")
+
+    p3 = M.LadderProject()
+    p3.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "I0"},
+                          {"kind": "coil", "norm": "LATCH", "addr": "A0"}])
+    p3.add_rung(elements=[{"kind": "end"}])
+    clean = [w for w in p3.validate() if "A0" in w or "A 段" in w]
+    ok_all &= chk("写 A0 完全不下警告", not clean, str(clean) if clean else "")
 
     print()
     print("=" * 66)
-    print(" 4. 真机语料：S / I 从不作线圈")
+    print(" 4. 真机语料：S / I 从不作线圈，A 才是内部标志")
     print("-" * 66)
     samples = parse_argv(sys.argv)
     files = [os.path.join(samples, f) for f in sorted(os.listdir(samples))
@@ -107,6 +123,7 @@ def main():
     if not files:
         print("  [SKIP] 没有可用的 .lad 语料")
     import re
+    a_seen = set()
     for f in files:
         import syntec_read as R
         info = R.read_ladder(f)
@@ -120,10 +137,30 @@ def main():
                 if e.get("kind") == "coil" and a:
                     k = re.match(r"[A-Z]+", str(a)).group()
                     cnt[k] = cnt.get(k, 0) + 1
+                if a and re.match(r"^A\d+$", str(a)):
+                    a_seen.add(int(str(a)[1:]))
         for r in info["rungs"]:
             walk(r["elements"])
         ok_all &= chk(os.path.basename(f), not cnt.get("S") and not cnt.get("I"),
                       "线圈分布 " + ", ".join(f"{k}:{v}" for k, v in sorted(cnt.items())))
+    if a_seen:
+        mx, n = max(a_seen), len(a_seen)
+        ok_all &= chk("A 段落在 0~511 内", mx <= ADB.A_POINTS - 1,
+                      f"用了 {n} 个不同编号, 最大 A{mx}")
+
+    print()
+    print("=" * 66)
+    print(" 5. 元件类型表 (手册 2.1)")
+    print("-" * 66)
+    ok_all &= chk("覆盖 8 类元件", set(ADB.DEVICE_TYPES) ==
+                  {"I", "O", "A", "C", "S", "R", "CT", "TM"},
+                  "/".join(sorted(ADB.DEVICE_TYPES)))
+    ok_all &= chk("A 定义为虚拟辅助接点", "辅助" in ADB.device_type("A")[0],
+                  ADB.device_type("A")[0] + " " + ADB.device_type("A")[2])
+    ok_all &= chk("S 定义为核心->阶梯图", "核心" in ADB.device_type("S")[0],
+                  ADB.device_type("S")[0])
+    ok_all &= chk("R 定义为双向沟通", "双向" in ADB.device_type("R")[0],
+                  ADB.device_type("R")[2])
 
     print()
     print("=" * 66)
