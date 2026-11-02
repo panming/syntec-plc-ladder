@@ -32,10 +32,6 @@ INFER = {
     "R517": ("只读", "同上，人机写入"),
     "R518": ("唯写", "决定手动命令参考哪个坐标系，由阶梯设定"),
     "R519": ("保留", "系统保留区"),
-    "R520~R529": ("读写", "第一轴群命令缓存器，命令由阶梯写、状态回读"),
-    "R530~R539": ("读写", "第二轴群命令缓存器，同上"),
-    "R540~R549": ("读写", "第三轴群命令缓存器，同上"),
-    "R550~R559": ("读写", "第四轴群命令缓存器，同上"),
     "R560~R579": ("保留", "系统保留区"),
     "R580": ("唯写", "主轴 PLC 控制模式，阶梯置位选定"),
     "R588": ("只读", "刚攻模式「正在」状态，由核心回报"),
@@ -63,7 +59,8 @@ INFER = {
     "R851~R856": ("唯写", "个别主轴转速百分比，由阶梯设定"),
     "R861~R870": ("只读", "加工暂停点机械坐标回报"),
     "R926": ("保留", "保留"),
-    "R961~R976": ("唯写", "原点极限开关偏移量，由阶梯设定"),
+    # R961~R976 手册只有一句「原点极限开关偏移量，单位 0.01 圈/0.01mm」,
+    # 没写谁写。原本按「偏移量必由阶梯设定」推成唯写, 属猜, 改标待确认。
     "R1004": ("只读", "总工件数，核心维护"),
     "R1009": ("只读", "开机时间(毫秒)，核心维护"),
 }
@@ -75,7 +72,37 @@ NORM = {"只读": "只读", "唯写": "唯写", "读写": "读写", "读/写": "
 NAME_FIX = {
     "R630": "Axis M code complete（见 R629）",
     "R1020~1023": "PLC File System",
+    # 这两条手册都叫「开机时间」, 区别只在单位, 不写进名称会像上一轮 R1014 那样被当成重复项
+    "R1009": "Power-on time (ms，71 分钟回绕)",
+    "R1012": "Power-on time (s)",
 }
+
+
+def _axis_groups():
+    """R520~R559 四个轴群命令缓存器。
+
+    手册在这一条里把内部布局逐个写清楚了:R520 命令 / R521 状态 / R522 主程序号 /
+    R523 切削% / R524 快动% / R525 目标刀号 / R526 单节剩余距离 / R527~529 保留。
+    整段判「读写」会把「写状态寄存器」也放过去 —— 状态是核心写的, 阶梯只能读。
+    """
+    out = {}
+    layout = [(0, 0, "命令缓存器", "唯写"),
+              (1, 1, "状态缓存器", "只读"),
+              (2, 2, "主程序号码(0~999999)", "唯写"),
+              (3, 3, "切削进给百分比", "唯写"),
+              (4, 4, "快动进给百分比", "唯写"),
+              (5, 5, "目标刀号", "唯写"),
+              (6, 6, "执行中单节剩余距离", "只读"),
+              (7, 9, "保留扩充用", "保留")]
+    for gi in range(4):
+        base = 520 + gi * 10
+        out[f"R{base}~R{base + 9}"] = [
+            (base + d0, base + d1, f"AX{gi + 1} {nm}", pm) for d0, d1, nm, pm in layout
+        ]
+    return out
+
+
+SUB_SPLIT = _axis_groups()
 
 # 区段内掉电保持: 1-1.4.3 给的是「否」, 但 1-1.4.4 里明确写「关机保留」的按条目走
 KEEP_HINT = ("关机保留", "永久保存")
@@ -146,8 +173,25 @@ def main(argv=None):
     lines = []
     stat = {"手册": 0, "推断": 0, "未列明": 0}
     writable = []
+    perm_of = {}          # 地址 -> (权限, 依据), 供第五节/第六节复用, 避免两处各推一遍
     for x in rows:
         tag = x["addr"].replace(" ", "")
+        # 手册只给整段说明、内部却是「命令区 + 状态区」混排的, 按明细拆行
+        subs = SUB_SPLIT.get(tag)
+        if subs:
+            stat["推断"] += 1
+            for lo, hi, sname, sperm in subs:
+                disp = addr_span(lo, hi)
+                hit = "✓" if any(lo <= u <= hi for u in used) else ""
+                note = ("按手册明细拆分（%s）；权限依用途推定：状态与剩余距离由核心写、"
+                        "命令类由阶梯写" % x["name"][:28] if sperm != "保留"
+                        else "手册原文标「保留扩充用」")
+                lines.append(f"| `{disp}` | {sname} | {sperm} | 是 | 否 | {hit} | 推断 | {note} |")
+                for i in range(lo, hi + 1):
+                    perm_of[i] = (sperm, "推断")
+                if sperm in ("唯写", "读写"):
+                    writable.append((disp, sname, sperm))
+            continue
         perm = NORM.get(x["perm"].strip(), "")
         why = ""
         if perm:
@@ -164,6 +208,8 @@ def main(argv=None):
         name = NAME_FIX.get(tag) or x["name"][:44]
         note = (why if src == "推断" else x["desc"].split("。")[0][:60]).replace("|", "／")
         lines.append(f"| `{disp}` | {name} | {perm} | {bits} | {keep} | {hit} | {src} | {note} |")
+        for i in range(x["lo"], x["hi"] + 1):
+            perm_of[i] = (perm, src)
         if perm in ("唯写", "读写"):
             writable.append((disp, name, perm))
 
@@ -179,9 +225,13 @@ def main(argv=None):
     md.append("两点结论：\n")
     md.append("1. 「依下表定义之」= 权限不在这张表里，要翻 1-1.4.4 逐条看。整片判只读是错的。")
     md.append("2. `R640` 以上**不能按位寻址**（`R700.0` 非法），512~639 可以（`R590.2` 合法）。\n")
-    md.append(f"## 二、逐条（共 {len(rows)} 条）\n")
+    md.append(f"## 二、逐条（手册 {len(rows)} 条）\n")
     md.append(f"手册明写权限 {stat.get('手册',0)} 条，手册留空另行推断 {stat.get('推断',0)} 条，"
-              f"待确认 {stat.get('待确认',0)} 条。\n")
+              f"待确认 {stat.get('待确认',0)} 条。")
+    if len(lines) != len(rows):
+        md.append(f"其中 `R520~R559` 四个轴群缓存器按手册明细拆成 "
+                  f"{len(lines) - len(rows) + 4} 行，故下表共 {len(lines)} 行。")
+    md.append("")
     md.append("| 地址 | 名称 | 阶梯程序 | 位存取 | 保持 | 样本用到 | 依据 | 说明 |")
     md.append("|---|---|---|---|---|---|---|---|")
     md.extend(lines)
@@ -219,12 +269,47 @@ def main(argv=None):
         md.append("要么手册版本比 CNC 版本旧，要么是厂商自定义后占用了保留区。"
                   "工具对这几个地址不做权限判定，也不要当成保留区报错。\n")
 
-    md.append("## 五、需要人工确认的推断\n")
+    md.append("## 五、需要你确认的地方\n")
+    md.append("判「只读」推错了会误报，程序一跑就露馅；判「可写」推错了是**静默放行**——"
+              "写进只读区不报错、只是不生效。所以这里按风险排：先列判不了的，"
+              "再列所有推断成可写的。推断成只读的不列，它们在第二节能直接看出来。\n")
+
+    md.append("### 5.1 手册没写谁写，本表不判定\n")
+    dash = sorted({i for i, (pm, sc) in perm_of.items() if sc == "待确认"})
+    if not dash:
+        md.append("无。\n")
+    else:
+        runs, st, pv = [], None, None
+        for i in dash:
+            if st is None:
+                st = pv = i
+            elif i == pv + 1:
+                pv = i
+            else:
+                runs.append((st, pv)); st = pv = i
+        if st is not None:
+            runs.append((st, pv))
+        for lo, hi in runs:
+            md.append(f"- `{addr_span(lo, hi)}` —— 手册原文只有一句功能描述，"
+                      f"一个字没提谁设定。**不判**：工具遇到它既不报错也不放行。")
+        md.append("")
+
+    md.append("### 5.2 手册留空、按用途推成可写\n")
     for x in rows:
-        if not NORM.get(x["perm"].strip(), "") and x["addr"].replace(" ", "") in INFER:
-            perm, why = INFER[x["addr"].replace(" ", "")]
-            md.append(f"- `{x['addr'].replace(' ','')}` **{perm}** —— {why}；"
+        tag = x["addr"].replace(" ", "")
+        if SUB_SPLIT.get(tag):
+            continue
+        pm, sc = perm_of.get(x["lo"], ("", ""))
+        if sc == "推断" and pm in ("唯写", "读写"):
+            why = INFER.get(tag, ("", ""))[1]
+            md.append(f"- `{addr_span(x['lo'], x['hi'])}` **{pm}** —— {why}；"
                       f"手册原文：{x['desc'][:70]}")
+    if SUB_SPLIT:
+        md.append("- `R520~R559` **唯写（各组命令类）/ 只读（状态类）** —— 手册给了组内明细"
+                  "（命令缓存器 / 状态缓存器 / 主程序号码 / 切削% / 快动% / 目标刀号 / "
+                  "单节剩余距离 / 保留），但没给权限。我按「状态与剩余距离只可能是核心写、"
+                  "命令类只可能是阶梯写」拆成 32 项。**这一组请重点看**，因为一份程序里"
+                  "写轴群命令的写法很常见。")
     md.append("")
 
     # ---- 与现有地址库对账 ----
@@ -232,16 +317,30 @@ def main(argv=None):
     try:
         import syntec_address_db as DB
         bad = []
-        for x in rows:
-            tag = x["addr"].replace(" ", "")
-            perm = NORM.get(x["perm"].strip(), "") or INFER.get(tag, ("待确认", ""))[0]
-            if perm in ("待确认", "保留"):
-                continue
-            lvl, msg = DB.check_write("R%d" % x["lo"])
-            db_ok = lvl is None                    # None = 库认为可写
-            want = perm in ("唯写", "读写")
-            if db_ok != want:
-                bad.append((addr_span(x["lo"], x["hi"]), perm, lvl or "可写"))
+        # 按手册条目聚合: 同一条目里结论相同的连续地址压成一段, 否则表格会有 160 行
+        def squash(idxs):
+            runs, st, pv = [], None, None
+            for i in idxs:
+                if st is None:
+                    st = pv = i
+                elif i == pv + 1:
+                    pv = i
+                else:
+                    runs.append((st, pv)); st = pv = i
+            if st is not None:
+                runs.append((st, pv))
+            return "、".join(addr_span(x, y) for x, y in runs)
+
+        for row in rows:
+            seg = [(i, perm_of[i][0]) for i in range(row["lo"], row["hi"] + 1)
+                   if i in perm_of and perm_of[i][0] not in ("待确认", "保留")]
+            by_perm = {}
+            for i, pm in seg:
+                by_perm.setdefault(pm, []).append(i)
+            for pm, idxs in by_perm.items():
+                lvl, _ = DB.check_write("R%d" % idxs[0])
+                if (lvl is None) != (pm in ("唯写", "读写")):
+                    bad.append((squash(idxs), pm, lvl or "可写"))
         if bad:
             md.append(f"地址库把 `R512~R1023` 整片当成「阶梯只读」，与本表冲突 "
                       f"**{len(bad)} 条**：\n")
