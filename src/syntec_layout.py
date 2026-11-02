@@ -321,8 +321,10 @@ def build_lad(rungs, tail=b'\x00\xfe'):
 
 
 # ==================== 渲染 (给人看) ====================
+# 置位/复位用 ⊕ / ⊖: 单个字符, 不会和 R50.1 里的 R 撞成 "RR50.1",
+# 也不会像 "S:" 那样把 R50.10 挤到 8 个字符宽(标签区只有 7 格)。
 COIL_SYM_SHORT = {'NO': '=', 'NC': '/', 'RP': '^', 'FP': 'v',
-                  'LATCH': 'S', 'UNLATCH': 'R'}
+                  'LATCH': '⊕', 'UNLATCH': '⊖'}
 
 FB_OP_SYM = {'ADD': '+', 'SUB': '-', 'MUL': '*', 'DIV': '/',
              'ADD_IMM': '+', 'SUB_IMM': '-', 'MUL_IMM': '*', 'DIV_IMM': '/',

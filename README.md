@@ -29,7 +29,7 @@
 │   ├── syntec_read.py                # 整文件读取 / 无损载入
 │   ├── syntec_model.py               # 工程模型
 │   ├── syntec_re.py                  # 早期解码器（报告用）
-│   ├── syntec_address_db.py/.json    # 602 条标准地址库
+│   ├── syntec_address_db.py/.json    # 602 条标准地址库 + C/S/R 地址权限模型
 │   └── build_bundle.py               # 打包单文件版
 ├── tools/                            # 验证脚本 (含 verify_comments.py 注释编码验证)
 ├── samples/                          # 编辑器手工产出的测试样本
@@ -123,6 +123,7 @@ MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力*
 skill/syntec-plc/
 ├── SKILL.md                        # 工作流 + 硬约束 + 反模式清单
 ├── references/
+│   ├── address-map.md              # C/S 全表(各 512 点) + R 分配表, 从厂商手册抽取
 │   ├── element-grammar.md          # add_rung 的完整元件语法、地址规则、定时器 K 值换算
 │   ├── patterns.md                 # 12 个机床工艺模式（启保停/自动手动/锁存报警/单次动作/互锁…）
 │   ├── lad-format.md               # 字节结构速查，排错用
@@ -161,7 +162,8 @@ unzip syntec-plc.zip -d ~/.workbuddy/skills/
 |---|---|
 | 生成合法但逻辑错的程序 | 硬约束表 + 12 个已验证工艺模式 |
 | 拿 `C` 段当中间继电器（撞系统急停/倍率） | 开写前必须 `lookup_address` 查 |
-| 一个输出挂多个线圈，只有最后一处生效 | 「收敛到 S 位 + LATCH/UNLATCH」 |
+| 拿 `S` 段当内部标志（`S` 是 CNC→PLC 的只读状态） | 地址方向表 + `validate` 直接拦写 `S` |
+| 一个输出挂多个线圈，只有最后一处生效 | 「收敛到 `R` 位 + LATCH/UNLATCH」 |
 | 注释用简体，编辑器显示问号 | `zh_tw.py` + 前置检查 |
 | 地址超 511 被静默截断 | 硬约束表写明，工具已改为直接报错 |
 | 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |

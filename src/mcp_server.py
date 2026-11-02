@@ -119,6 +119,7 @@ TOOLS = [
             "  2) 直接传 elements: 按视觉从左到右排列的完整元件列表。\n"
             "元件格式(对象):\n"
             "  {kind:'contact', norm:'NO'|'NC', addr:'I132'}              // 触点, addr 可为 I/O/C/S/A/R + 数字\n"
+            "      // 位元件 0..511; S 段是 CNC->PLC 只读接口(如 S0=加工中), 只能当触点\n"
             "  {kind:'coil', norm:'NO'|'NC'|'RP'|'FP'|'LATCH'|'UNLATCH', addr:'O10'}\n"
             "  {kind:'contact_t', norm:'NO'|'NC', index:27}   // 定时器触点 TM27\n"
             "  {kind:'contact_c', norm:'NO'|'NC', index:5}    // 计数器触点 CT5\n"
@@ -201,7 +202,7 @@ TOOLS = [
     },
     {
         "name": "validate",
-        "description": "对当前工程做结构校验, 返回警告列表(类似编辑器'不合理输出'提示): 是否缺 END、地址是否越界、行是否无输出元件等。",
+        "description": "对当前工程做结构校验, 返回警告列表(类似编辑器'不合理输出'提示): 是否缺 END、地址是否越界、行是否无输出元件、地址能不能写(写 S 段/写只读 R 区/位存取非法)等。",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -440,6 +441,13 @@ def h_explain_format(args):
         "       0.01s: K 0xc3 / R 0xe2  0.001s: K 0xc2 / R 0xe7\n"
         "   - 计数器(8字节): UP 0xc6/0xe5 DOWN 0xc7/0xe6 RESET 0xc9 RING_UP 0xe0/0xe9 RING_DOWN 0xe1/0xea\n"
         "   - 流程: JMP 0xca / JSR 0xcb / MSG 0xd4 / LAB 0xd5 / RTS 0xd0 / END 0xcf / FEND 0xfd\n"
+        "【地址段: 方向决定能不能写】\n"
+        "   I 物理输入 (现场接线决定)    O 物理输出 (程序写)\n"
+        "   C PLC->CNC 系统命令(512点, 如 C0 起动/C36 急停/C6 X轴JOG+) —— 能写, 但每个点接内核\n"
+        "   S CNC->PLC 系统状态(512点, 如 S0 加工中/S1 暂停/S32 Reset/S33 NC Ready) —— 只读, 不能写线圈\n"
+        "   R 数据寄存器; 内部标志位只能放 R 的位:\n"
+        "       过程量 R50.0~R80.15 (掉电不保持)      跨断电 R193.0~R255.15 (保持, 避开R103~R192刀号)\n"
+        "       注意 R1033 以上 位存取=否, 不能写 R1200.0 这种\n"
         "4. 标准地址(C/S/R) 602 条已入库, 用 lookup_address 查。\n\n"
         "【并联(竖线)编码 —— 已对 1188 条真实 rung 全量验证】\n"
         "   连接字节 4 位 = 前后两条列边界上的竖线: bit2/bit3 = 左边界上/下半段, bit0/bit1 = 右边界上/下半段。\n"
@@ -461,7 +469,8 @@ def h_explain_format(args):
         "  - 刀库/CNC 组功能块、RS232、MODBUS、背景运算、间接定址: 样本中未出现, 编码未知。\n"
         "  - JMP/MSG/ROT 能读能原样保留, 但还没有生成参数 (用 raw 形式)。\n\n"
         "【写入前的自检】\n"
-        "  validate 会查出: 末行无 END / 地址越界 / 只有条件无输出 / 双线圈 / 定时器重号 / 计数器重号。\n"
+        "  validate 会查出: 末行无 END / 地址越界 / 只有条件无输出 / 双线圈 / 定时器重号 / 计数器重号\n"
+        "                  / 写 S 段(只读) / 写只读 R 区 / R 位存取非法。\n"
         "  双线圈在编辑器打开时同样会报警, 且实际只有一处生效 —— 务必先改掉再保存。\n"
     )
 
@@ -512,7 +521,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.7.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.8.0"},
         }
     if method == "ping":
         return {}

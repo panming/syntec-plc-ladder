@@ -242,6 +242,24 @@ def to_rung_bytes(els, left_anchor=None):
 # ----------------------------------------------------------------------------
 # LadderProject
 # ----------------------------------------------------------------------------
+def _check_bit_read(addr):
+    """读触点时的地址检查。S/C 只读没问题, 但 R 的位不是每个区都能取。"""
+    kind, val = parse_addr(addr)
+    if kind != 'R':
+        return (None, None)
+    base = int(val)
+    bit = 0 if isinstance(val, int) else int(round((val - base) * 10))
+    if bit == 0 and isinstance(val, int):
+        return (None, None)          # 整字访问, 不涉及位存取
+    z = ADB.r_zone(base)
+    if z is None:
+        return ("warn", f"{addr}: R{base} 不在权限表里(保留区)，行为未定义")
+    if not z["bit"]:
+        return ("error", f"{addr}: R{base} 所在的「{z['note']}」不支持位存取，"
+                         f"不能用 R{base}.{bit}")
+    return (None, None)
+
+
 class LadderProject:
     def __init__(self):
         self.reset()
@@ -380,6 +398,13 @@ class LadderProject:
                     elif kind in ('TM', 'CT'):
                         if isinstance(val, int) and not (0 <= val <= 255):
                             warns.append(f"R{ri}: {a} 超出 0~255 范围。")
+                    # 地址权限: 写 S 段 / 写只读 R 区 / 位存取非法
+                    if el.get("kind") == "coil":
+                        lvl, msg = ADB.check_write(a)
+                    else:
+                        lvl, msg = _check_bit_read(a)
+                    if lvl and msg:
+                        warns.append(f"R{ri}: {msg}")
                 if el.get("kind") == "timer":
                     p = int(el.get("preset", 0))
                     if not (0 <= p <= 65535):

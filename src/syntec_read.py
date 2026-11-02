@@ -42,7 +42,9 @@ def bits_to_addr(n):
     if 1 <= n4 <= 5:
         base = (n3 >> 5) + (n4 - 1) * 128
         bit = n3 & 0x1F
-        return f"R{base}.{bit}" if bit else f"R{base}"
+        # 这一区永远是按位寻址的, bit=0 也照样显示 .0 —— 位设备里 "R50" 和
+        # "R50.0" 编成同一个 16 位数, 少写一位会让人以为在读整个寄存器。
+        return f"R{base}.{bit}"
     return f"#{n}"
 
 

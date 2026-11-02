@@ -164,6 +164,102 @@ def lookup(addr):
     return REVERSE_INDEX.get(addr, [])
 
 
+# ---------------------------------------------------------------------------
+# 地址权限模型
+# 数据来源: 《CNC and PLC Interface》1-1.1 (C Bit, PLC->CNC)、
+#           1-1.2 (S Bit, CNC->PLC)、1-1.4.3 (R 资源分配表)
+#
+# 三条硬事实:
+#   1. S 段 512 点全部是 CNC->PLC 的系统信号 (S000 加工中 / S032 Reset /
+#      S033 NC Ready ...), 阶梯程序只能读, 写进去没有意义 —— 它不是内部中间继电器。
+#   2. C 段 512 点是 PLC->CNC, 阶梯写、CNC 读。写是合法的, 但每一个都接到内核上
+#      (C0 起动加工 / C36 急停 / C37 外部复位), 不能当通用标志位。
+#   3. 内部标志位只能用 R 寄存器的位, 且不是所有 R 区都能位存取。
+# ---------------------------------------------------------------------------
+
+# R 区权限表: (起, 止, 阶梯可读, 阶梯可写, 允许位存取, 掉电保持, 说明)
+R_ZONES = [
+    (0, 39, True, False, True, False, "CNC 系统接口区"),
+    (40, 49, True, True, True, False, "PLC 警报讯息区"),
+    (50, 80, True, True, True, False, "使用者自订"),
+    (81, 100, True, False, True, True, "对应系统参数 3401~3420"),
+    (101, 102, True, True, True, True, "刀具状态(存于 IO 卡)"),
+    (103, 255, True, True, True, True,
+     "使用者自订(R103~R192 铣床刀号 T1~T90; 存于 IO 卡)"),
+    # 手册这两行是残缺的合并单元格, 只知道「不是给用户的」; 按最保守处理: 读可以, 写不行
+    (256, 511, True, False, False, False, "保留区(手册未列明)"),
+    (512, 639, True, False, True, False, "CNC 系统接口区"),
+    (640, 1023, True, False, False, False, "保留区(含 R1000 计数等系统量, 阶梯只读)"),
+    (1024, 1032, True, True, False, False, "铣床自动分中/对刀占用"),
+    (1033, 2049, True, True, False, False, "使用者自订"),
+    (2050, 2090, True, True, False, False,
+     "使用者自订(Pr3810=1 时被多 M 码功能占用)"),
+    (2091, 2099, True, True, False, False, "使用者自订"),
+    (2100, 3100, True, True, False, False,
+     "使用者自订(Pr3228=1 时被刀具管理占用)"),
+    (3101, 4095, True, True, False, False, "使用者自订"),
+    (4096, 5999, True, False, False, False, "CNC 系统接口区"),
+    (6000, 7999, True, True, False, True, "使用者自订(存于 IO 卡)"),
+    (8000, 8255, True, False, False, True, "CNC 系统接口区"),
+    (8256, 9999, True, False, False, False, "CNC 系统接口区"),
+    (10000, 10999, True, True, False, True, "CNC 系统加值应用记忆区"),
+    (11000, 14999, True, False, False, False, "CNC 系统接口区"),
+    (15000, 19999, True, True, False, False, "CNC 系统加值应用非记忆区"),
+    (20000, 65535, True, True, False, False, "使用者自订"),
+]
+
+
+def r_zone(no):
+    """查 R 号落在哪个权限区。返回 dict 或 None(未定义区)。"""
+    for lo, hi, rd, wr, bit, keep, note in R_ZONES:
+        if lo <= no <= hi:
+            return {"lo": lo, "hi": hi, "read": rd, "write": wr,
+                    "bit": bit, "keep": keep, "note": note}
+    return None
+
+
+# 内部标志位推荐区。给 AI 用: 不知道放哪就放这里。
+FLAG_VOLATILE = ("R50", "R80")      # 掉电不保持, 可位存取
+FLAG_RETENTIVE = ("R193", "R255")   # 掉电保持, 可位存取 (避开 R103~R192 刀号)
+
+
+def check_write(addr):
+    """检查「把结果写进这个地址」是否成立。
+       返回 (等级, 说明): 等级 'error' 表示写了也不生效/会撞系统, 'warn' 表示可用但要确认。"""
+    import re
+    s = str(addr).strip().upper()
+    m = re.match(r"^([A-Z]+)\s*(\d+)(?:\.(\d+))?$", s)
+    if not m:
+        return (None, None)
+    kind, num, bit = m.group(1), int(m.group(2)), m.group(3)
+
+    if kind == "S":
+        return ("error",
+                f"{s}: S 段是 CNC->PLC 的系统信号输入(只读)，"
+                f"写线圈不会生效。内部标志请用 {FLAG_VOLATILE[0]}.x ~ "
+                f"{FLAG_VOLATILE[1]}.x")
+    if kind == "I":
+        return ("warn", f"{s}: I 是物理输入点，写它不会改变现场信号")
+    if kind == "C":
+        hit = lookup(s)
+        if not hit:
+            return ("warn", f"{s}: C 段是 PLC->CNC 的系统接口，这个编号地址库里没有，"
+                            f"先在手册确认真的是空位再用")
+        return (None, None)
+    if kind == "R":
+        z = r_zone(num)
+        if z is None:
+            return ("warn", f"{s}: R{num} 不在权限表里(保留区)，行为未定义")
+        if not z["write"]:
+            return ("error", f"{s}: R{num} 属于「{z['note']}」，阶梯程序只读，"
+                            f"写入会被系统覆盖或直接无效")
+        if bit is not None and not z["bit"]:
+            return ("error", f"{s}: R{num} 所在的「{z['note']}」不支持位存取，"
+                            f"不能用 R{num}.{bit}，改用 {FLAG_VOLATILE[0]}.x")
+        return (None, None)
+    return (None, None)
+
+
 def axis_addr(func_name, axis):
     """查询某功能在某轴的地址。axis: 1..16"""
     info = AXIAL.get(func_name)
