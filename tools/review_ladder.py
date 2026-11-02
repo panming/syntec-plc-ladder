@@ -139,6 +139,52 @@ def fmt(rows):
     return "、".join(str(x) for x in rows)
 
 
+# check_write 的 warn 有好几种成因, 得分别给标题和建议, 不能一锅端。
+WARN_TITLE = {
+    "reserved": "手册标「保留」的地址",
+    "relay":    "把 R 的位当内部中间继电器用",
+    "unknown":  "地址库里没有这个编号",
+    "input":    "写入物理输入点",
+}
+WARN_DETAIL = {
+    "reserved": "只提示不阻断：保留区被厂商占用已有先例（R938~R940），"
+                "若现场确认可用就照用。",
+    "relay":    "手册这一段是「使用者自订、可位存取」，写进去是合法的。"
+                "只是 R 是 32 位数据寄存器，逐位当辅助继电器用不好读；"
+                "新写的代码建议改用 A 段，老程序照原样保留即可。",
+    "unknown":  "这个编号地址库里查不到，先翻手册确认真是空位再用。",
+    "input":    "I 是现场输入，写它不会改变实际信号。",
+}
+
+
+def warn_kind(msg):
+    """把 check_write 的说明归到上面几类。"""
+    if "保留" in msg or "行为未定义" in msg:
+        return "reserved"
+    if "内部中间继电器" in msg:
+        return "relay"
+    if "物理输入点" in msg:
+        return "input"
+    return "unknown"
+
+
+def externally_driven(addr):
+    """这个触点地址是不是「本来就不该由阶梯程序驱动」的？
+
+    I/C/S 是外部给的。R 段里还有一批阶梯只读的地址：系统参数传入区
+    (R81~R100 对应参数 3401~3420)、CNC 系统接口区、1-1.4.4 列明只读的
+    寄存器。它们由核心或参数画面写入，全文没有线圈是正常的。
+    典型误报：R100.2「寸动模式」被当成「没人驱动的悬空触点」。
+    """
+    a = str(addr).upper()
+    if a[0] in ("I", "C", "S"):
+        return True
+    if a[0] != "R":
+        return False
+    res = DB.check_write(a)
+    return bool(res and res[0] == "error" and "只读" in res[1])
+
+
 class Report:
     def __init__(self):
         self.items = []
@@ -211,7 +257,7 @@ def main():
     #    不是只读。具体权限在 1-1.4.4 里逐条定义，例如
     #    R590~R599 = PLC 提示讯息（阶梯写）、R603 = 禁止轴移动命令（阶梯写）。
     #    拿区段表一刀切成"只读"会把正常接口位全判成错，所以这里分开处理。
-    ro, per_addr = [], []
+    ro, warns = [], collections.defaultdict(list)
     for a, uses in sorted(coils.items()):
         kind = a[0].upper()
         rows_used = [r for _, r in uses]
@@ -230,16 +276,21 @@ def main():
             if res and res[0] == "error":
                 ro.append(f"`{a}`：{res[1]}（rung {fmt(rows_used)}）")
             elif res and res[0] == "warn":
-                per_addr.append(f"`{a}`（rung {fmt(rows_used)}）")
+                warns[warn_kind(res[1])].append(f"`{a}`（rung {fmt(rows_used)}）")
     for x in ro:
         rep.add("错误", x)
-    if per_addr:
-        rep.add("提示", f"{len(per_addr)} 处写入落在手册标「保留」的地址上",
-                "只提示不阻断：保留区被厂商占用已有先例（R938~R940），"
-                "若现场确认可用就照用。\n" + "、".join(per_addr))
+    # 别把所有 warn 一律说成「保留区」：cnc.lad 的 13 条其实是「拿 R 的位
+    # 当中间继电器用」, 手册 R50~R80 明明是使用者自订可写。措辞错了会把
+    # 人引去查一份根本不存在的保留区文档。
+    for k, items in sorted(warns.items()):
+        rep.add("提示", f"{len(items)} 处写入：{WARN_TITLE[k]}",
+                WARN_DETAIL[k] + "\n" + "、".join(items))
 
     # 4 触点用到的地址从不被驱动（只在 R/A 有意义；I/C/S 是外部给的）
     #    整字写入（MOVE/MATH）也算驱动了它的每一位，否则 R53.0 这种会误报
+    #    另外 R 段里「阶梯只读」的地址由核心/参数画面写入，阶梯本来就不会
+    #    有线圈 —— 典型是 R100.2(参数 3420 的寸动模式位)，不排除就会误报成
+    #    「没人驱动」。判据直接问 check_write：写了不生效的，就不是阶梯该驱动的。
     driven = set(coils)
     for reg, uses in moves.items():
         driven.add(reg)
@@ -248,9 +299,7 @@ def main():
             driven.add(f"{base}.{bit}")
     dangling = []
     for a, uses in sorted(contacts.items()):
-        if a[0].upper() in ("I", "C", "S"):
-            continue
-        if a in driven:
+        if a in driven or externally_driven(a):
             continue
         dangling.append(f"`{a}` 被当作触点用了 {len(uses)} 次（rung {fmt(sorted({r for _, r in uses}))}），"
                         f"但全文没有任何一处驱动它")

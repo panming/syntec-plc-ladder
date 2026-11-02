@@ -420,7 +420,28 @@ def dev_name(n):
 VERT_UP, VERT_DN = 0x01, 0x02      # 右边界: 上半段 / 下半段
 
 
-def render_line(grid):
+def needed_width(grid):
+    """这一行要用多宽才不会把元件标签截掉。
+
+    W=8 时单格元件只能写 7 个字符, `=R590.14`(8 字符) 会被砍成 `=R590.1`,
+    于是 R590.10~R590.14 五个不同的报警位在文本里长得一模一样 —— 审查时
+    会误以为「同一个位被写了五次」。所以按最宽的一个标签决定整行宽度。
+
+    返回的是**整份图共用的**列宽, 调用方应对所有行取 max 后传进 render_line,
+    否则宽窄不一会让竖线对不齐。
+    """
+    W = 8
+    for c in range(COLS):
+        cell = grid[c]
+        if cell is None or cell[1] is None:
+            continue
+        span = max(1, L.span_of(cell[1]))
+        n = len(str(el_label(cell[1]))) + 1          # 末格留给竖线
+        W = max(W, -(-n // span))                    # ceil(n / span)
+    return W
+
+
+def render_line(grid, W=None):
     """把一个网格行渲染成【一行】文本。
 
     老版 render_grid 输出 上/中/下 三行, 竖线被拆到元件行上下两侧, 读起来是断的。
@@ -429,8 +450,12 @@ def render_line(grid):
         只有上半段   -> ╵  (线从上方下来, 到本行为止 = 汇合点)
         只有下半段   -> ╷  (线从本行向下延伸 = 分叉点)
     一行 rung 行 = 一行文本, 分支层次一眼能看出。
+
+    W: 列宽。不传就按本行自适应(给单独渲染一行用); 渲染整份图时应在外面
+       对所有行取 max 后统一传入, 保证竖线列对齐。
     """
-    W = 8
+    if W is None:
+        W = needed_width(grid)
     buf = [' '] * (COLS * W + 2)
     for c in range(COLS):
         cell = grid[c]

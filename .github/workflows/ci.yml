@@ -68,6 +68,14 @@ jobs:
       - name: R512~R1023 逐条权限对账
         run: python tools/verify_r_iface.py
 
+      # 2026-11-02 审另一台机 cnc.lad 时暴露的四个工具缺陷：标签截断、
+      # 轴向表地址没补零、只读位误报悬空、warn 措辞一刀切。
+      - name: 审查工具回归
+        run: python tools/verify_review_fixes.py
+
+      - name: 报警定义 XML 对账（含合成自检）
+        run: python tools/verify_alarm_xml.py --selftest
+
       - name: 全量往返（仓库自带样本）
         run: python tools/roundtrip_full.py
 

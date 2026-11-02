@@ -27,6 +27,8 @@ cnc_saved.lad
 syntec_selftest*.lad
 verify_gen*.lad
 mcp_test.lad
+# 审查时导出的中间文本（渲染图 / 审查输出），不纳入版本管理
+/_*.txt
 # 技能包 build_program.py 每次运行都会重写这两个演示文件
 # （根目录的产物；samples/demo_parallel.lad 是仓库样本，不能挡）
 /demo.lad

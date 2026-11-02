@@ -355,6 +355,10 @@ def render_file(path, start=1, end=None):
     logic, others, _t = split_records(data)
     rows = [P.decode_row(r) for r in logic]
     erow = editor_rows(logic, others)      # 注释行占编辑器行, 行号要算进去
+    # 整份图统一列宽: 只要有一行出现 8 字符以上的标签(如 =R590.14),
+    # 所有行都得跟着加宽, 否则那几行的竖线会和上下行错开。
+    W = max((Y.needed_width([None if c is None else (c[0], c[1]) for c in row])
+             for row in rows), default=8)
     out = []
     for k, (node, la, a, b, why) in enumerate(P.reconstruct(rows), 1):
         if k < start or (end and k > end):
@@ -363,5 +367,5 @@ def render_file(path, start=1, end=None):
         for r in range(a, b + 1):
             # decode_row 给的是 (conn, 语义, 原始字节); 渲染只要前两项
             grid = [None if c is None else (c[0], c[1]) for c in rows[r]]
-            out.append(f'{r + 1 + erow[r]:>4}  {Y.render_line(grid)}')
+            out.append(f'{r + 1 + erow[r]:>4}  {Y.render_line(grid, W=W)}')
     return '\n'.join(out)

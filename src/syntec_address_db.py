@@ -58,9 +58,12 @@ AXIAL = {
     "PLC轴M码内容":        {"type": "R", "axes": [f"R6{i}" for i in range(81,97)]},
     "PLC轴G00/G01速率段数": {"type": "R", "axes": [f"R6{i}" for i in range(61,77)]},
     "各轴手轮手动比例常数":  {"type": "R", "axes": [f"R6{i}" for i in range(41,57)]},
-    "各轴单轴速度":        {"type": "R", "axes": [f"R7{i}" for i in range(1,17)]},
+    # 手册 1-1.4.4: R701~R716 / R901~R916, 轴号是**两位**. 早期写成 R7{i}
+    # 拼出 R71~R79, 让 lookup("R73") 谎报成「轴3速度」, 把使用者自订区
+    # R50~R80 的每个位都误挂上轴向含义。必须补零。
+    "各轴单轴速度":        {"type": "R", "axes": [f"R7{i:02d}" for i in range(1,17)]},
     "断点机械座标位置":     {"type": "R", "axes": [f"R8{i}" for i in range(61,71)] + [None]*6},
-    "各轴温度补偿量":      {"type": "R", "axes": [f"R9{i}" for i in range(1,17)]},
+    "各轴温度补偿量":      {"type": "R", "axes": [f"R9{i:02d}" for i in range(1,17)]},
     "原点栅格量":         {"type": "R", "axes": [f"R9{i}" for i in range(61,77)]},
     "各轴绝对位置记录器":   {"type": "R", "axes": [f"R9{i}" for i in range(81,97)]},
     "各轴追随误差量":      {"type": "R", "axes": [f"R50{i}" for i in range(1,9)] + [f"R50{i}" for i in range(9,17)]},
