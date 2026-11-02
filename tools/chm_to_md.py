@@ -202,6 +202,13 @@ def md_table(rows):
     return "\n".join(lines)
 
 
+# 手册 1-1.4.3 的 R 表在 R1014 处连着列了两行，编号相同、名称不同
+# （「累计开机时间」和「安装累计加工时间」）。现场对过：R1013 累计加工时间、
+# R1014 累计开机时间，「安装累计加工时间」这一行是排版错误，实际不存在这个量。
+# 直接略去，否则表里会出现两个 R1014，谁也不知道该信哪个。
+TYPO_ROWS = {("R1014", "安装累计加工时间")}
+
+
 def md_r_table(rows):
     """R 分配表。
 
@@ -211,7 +218,7 @@ def md_r_table(rows):
     """
     lines = ["| 编号 | 说明 | 宏程序/人机界面 | 阶梯程序 | 位存取 | 掉电保持 |",
              "|---|---|---|---|---|---|"]
-    seen, dup = set(), []
+    seen, dup, typo = set(), [], []
     for r in rows:
         cells = [c.lstrip(INHERIT) for c in r]
         merged = [c.startswith(INHERIT) for c in r]
@@ -220,6 +227,9 @@ def md_r_table(rows):
         cells += [""] * (6 - len(cells))
         merged += [False] * (6 - len(merged))
         addr = cells[0].replace("|", "\\|")
+        if (cells[0], cells[1].strip()) in TYPO_ROWS:
+            typo.append((cells[0], cells[1].strip()))
+            continue
         # 只有「单点编号重复」才是排版错。R2050~R2090 这种重复是手册有意列的
         # 条件行（Pr3810=0 / Pr3810=1 两种权限），不能当成错误。
         if "~" not in cells[0]:
@@ -234,12 +244,18 @@ def md_r_table(rows):
         vals = [("—" if not c.strip() else c.strip()) for c in cells[2:6]]
         lines.append("| `%s` | %s | %s | %s | %s | %s |"
                      % (addr, note, vals[0], vals[1], vals[2], vals[3]))
+    if typo:
+        names = "、".join("「%s」" % n for _, n in typo)
+        addrs = "、".join("`%s`" % a for a, _ in typo)
+        lines += ["",
+                  "> 注：手册原文在 %s 处多列了一行%s，编号与上一行相同。"
+                  "现场核对确认这是排版错误，已略去。" % (addrs, names)]
     if dup:
         uniq = "、".join(sorted(set(dup)))
         lines += ["",
                   "> ⚠️ 手册原文里 `%s` 出现了两次（编号重复，两个名称不同），"
-                  "抽取按原样保留、没有替你选一个 —— 这是排版错，"
-                  "在厂商确认前这一格别当用户区用。" % uniq]
+                  "抽取按原样保留、没有替你选一个 —— 先当排版错处理，别把这一格当用户区用。"
+                  % uniq]
     return "\n".join(lines)
 
 
