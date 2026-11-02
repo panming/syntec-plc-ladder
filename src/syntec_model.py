@@ -464,10 +464,15 @@ class LadderProject:
                 continue
             for el in leaves(els):
                 k = el.get("kind")
-                # SET/RESET(S/R) 是"写指令", 同一地址多处驱动正是它的标准用法
-                # (锁存报警、多处停车就是靠它避开双线圈), 不能算双线圈冲突。
-                if k == "coil" and el.get("addr") and el.get("norm", "NO") in ("NO", "NC", "RP", "FP"):
-                    _hit("线圈", el["addr"], ri)
+                if k == "coil" and el.get("addr"):
+                    norm = el.get("norm", "NO")
+                    # SET/RESET 是"写指令", 同一地址配一对(一置一复)是标准用法 ——
+                    # 锁存报警、多处停车就靠它避开双线圈。但**超过一对**编辑器会报
+                    # 「重复元件」: 两个 ⊖A1 或两个 ⊕A1 就是重复, 实测真会弹。
+                    if norm in ("NO", "NC", "RP", "FP"):
+                        _hit("线圈", el["addr"], ri)
+                    elif norm in ("LATCH", "UNLATCH"):
+                        _hit("置位" if norm == "LATCH" else "复位", el["addr"], ri)
                 elif k == "timer" and el.get("name"):
                     _hit("定时器", el["name"], ri)
                 elif k == "counter" and el.get("name"):
@@ -475,9 +480,32 @@ class LadderProject:
         for (what, _k), (rs, disp) in driven.items():
             if len(rs) > 1:
                 where = "+".join(f"R{r}" for r in rs)
+                if what in ("置位", "复位"):
+                    warns.append(
+                        f"{what} {disp} 出现 {len(rs)} 次 ({where}) —— 重复元件, "
+                        f"编辑器会报警。同一地址只留一处{what}, "
+                        f"多个{what}条件先并联再驱动它。")
+                else:
+                    warns.append(
+                        f"{what} {disp} 被 {len(rs)} 处驱动 ({where}) —— 双{what}, "
+                        f"编辑器会报警且实际只有一处生效, 请改用不同地址或合并到一处。")
+
+        # 同一地址既用普通线圈又用 SET/RESET: 每扫描刷新的线圈会盖掉锁存值。
+        per_addr = {}
+        for ri, els in enumerate(self.rungs, 1):
+            if els is None:
+                continue
+            for el in leaves(els):
+                if el.get("kind") == "coil" and el.get("addr"):
+                    norm = el.get("norm", "NO")
+                    kind = "置位/复位" if norm in ("LATCH", "UNLATCH") else "输出线圈"
+                    per_addr.setdefault(_key(el["addr"]), [el["addr"], {}])[1].setdefault(kind, []).append(ri)
+        for _k, (disp, kinds) in per_addr.items():
+            if len(kinds) > 1:
+                detail = "、".join(f"{k} R{v[0]}" for k, v in kinds.items())
                 warns.append(
-                    f"{what} {disp} 被 {len(rs)} 处驱动 ({where}) —— 双{what}, "
-                    f"编辑器会报警且实际只有一处生效, 请改用不同地址或合并到一处。")
+                    f"线圈 {disp} 既当输出线圈又当置位/复位 ({detail}) —— "
+                    f"输出线圈每个扫描都重写, 会把锁存值冲掉, 只能选一种。")
         return warns
 
     # ---- 序列化 ----

@@ -209,6 +209,49 @@ def main():
 
     print()
     print("=" * 66)
+    print(" 7. 同址驱动：双线圈 / 重复元件")
+    print("-" * 66)
+
+    def _coil(a, n="NO"):
+        return {"kind": "coil", "norm": n, "addr": a}
+
+    def _contact(a, n="NO"):
+        return {"kind": "contact", "norm": n, "addr": a}
+
+    def _build(spec):
+        """spec: [(触点地址, 线圈地址, 线圈类型), ...]"""
+        p = M.LadderProject()
+        for cond, co, norm in spec:
+            p.add_rung(elements=[_contact(cond), _coil(co, norm)])
+        p.add_rung(elements=[{"kind": "end"}])
+        return [w for w in p.validate() if "重复" in w or "双线圈" in w or "既当" in w]
+
+    # 实测踩过的坑: 一个地址 1 个置位 + 2 个复位, 编辑器弹「重复元件」。
+    w = _build([("I0", "A1", "LATCH"), ("I1", "A1", "UNLATCH"), ("I2", "A1", "UNLATCH")])
+    ok_all &= chk("1 置位 + 2 复位 -> 报重复元件",
+                  any("重复元件" in x for x in w), w[0][:60] if w else "没报出来")
+
+    # 一置一复是标准锁存用法, 不能误报。
+    w = _build([("I0", "A0", "LATCH"), ("I1", "A0", "UNLATCH")])
+    ok_all &= chk("1 置位 + 1 复位 -> 不报", not w, w[0][:60] if w else "")
+
+    # 两个置位同样是重复。
+    w = _build([("I0", "A2", "LATCH"), ("I1", "A2", "LATCH")])
+    ok_all &= chk("2 个置位 -> 报重复元件",
+                  any("重复元件" in x for x in w), w[0][:60] if w else "没报出来")
+
+    # 普通输出线圈只能有一个: 后面的会盖掉前面的。
+    w = _build([("I0", "O3", "NO"), ("I1", "O3", "NO")])
+    ok_all &= chk("2 个输出线圈 -> 报双线圈",
+                  any("双线圈" in x for x in w), w[0][:60] if w else "没报出来")
+
+    # 输出线圈每扫描重写, 会把置位/复位的锁存值冲掉。
+    w = _build([("I0", "A3", "NO"), ("I1", "A3", "LATCH")])
+    ok_all &= chk("输出线圈 + 置位混用 -> 报出",
+                  any("既当" in x for x in w), w[0][:60] if w else "没报出来")
+
+    print()
+    print("=" * 66)
     print(("全部通过 [PASS]" if ok_all else "有失败项 [FAIL]"))
     return 0 if ok_all else 1
 
