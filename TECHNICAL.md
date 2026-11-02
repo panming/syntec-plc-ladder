@@ -5,8 +5,9 @@
 
 - 适用对象：新代 SYNTEC CNC 控制器梯形图文件，控制器上的路径为
   `DiskC\OpenCNC\Ladder\cnc.lad`
-- 文档版本：v0.5.0（2026-11）
+- 文档版本：v0.11.1（2026-11）
 - 验证规模：13 个文件 / 2139 编辑行 / 1188 条 rung / 705 个并联块 / 1793 个分支
+  （含 2 份真机程序；仓库自带的 11 个样本可独立复跑，见 §9.4）
 - 每个结论都标了可信度：**[实测]** 逐字节对过；**[统计]** 在全量语料上一致，
   但可能还有没覆盖到的情形；**[推测]** 有依据但样本不足。
 
@@ -892,12 +893,18 @@ pads.append((块左, 块右, 0, live))   # 补线也只补到 live
 
 ### 9.4 复跑
 
-```bat
-python tools/selftest.py                 :: 自带数据, 不需要样本
-python tools/roundtrip_full.py           :: 用 samples/ 里的语料
-set SYNTEC_SAMPLES=D:/my_lad             :: 换成自己的样本目录
-python tools/verify_samples.py --samples %SYNTEC_SAMPLES%
-python tools/verify_parallel.py --samples %SYNTEC_SAMPLES%
+```bash
+python tools/selftest.py                 # 自带数据, 不需要样本
+python tools/roundtrip_full.py           # 用 samples/ 里的语料
+python tools/verify_samples.py           # 元件逐字节
+python tools/verify_parallel.py          # 并联结构
+python tools/verify_comments.py          # 注释编码
+python tools/verify_address.py           # 地址权限 / 同址驱动
+python tools/e2e_mcp.py                  # 起进程走 JSON-RPC，发版前必跑
+
+# 换成自己的样本目录
+python tools/roundtrip_full.py --samples D:/my_lad
+export SYNTEC_SAMPLES=D:/my_lad          # Windows: set SYNTEC_SAMPLES=D:/my_lad
 ```
 
 缺样本**不会**静默跳过：非可选样本缺失记 FAIL 并返回非 0 退出码。

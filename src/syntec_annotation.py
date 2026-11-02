@@ -31,7 +31,7 @@ def parse_dat(path):
 
 if __name__ == '__main__':
     import sys
-    p = sys.argv[1] if len(sys.argv) > 1 else r"C:/Users/panming/Desktop/CUSCMT_CHS.dat"
+    p = sys.argv[1] if len(sys.argv) > 1 else "CUSCMT_CHS.dat"
     res = parse_dat(p)
     print(f"解析到 {len(res)} 条注解:")
     for a, (s, l) in res.items():

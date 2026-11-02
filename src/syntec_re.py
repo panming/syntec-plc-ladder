@@ -588,7 +588,7 @@ def print_struct(data):
 
 # ==================== CLI ====================
 if __name__ == '__main__':
-    path = sys.argv[1] if len(sys.argv) > 1 else r"C:\Users\panming\Desktop\cnc.lad"
+    path = sys.argv[1] if len(sys.argv) > 1 else "cnc.lad"
     data = open(path, 'rb').read()
     raw = parse_raw(data)
     rows = parse_records(data)

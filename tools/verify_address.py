@@ -120,11 +120,16 @@ def main():
     print(" 4. 真机语料：S / I 从不作线圈，A 才是内部标志")
     print("-" * 66)
     samples = parse_argv(sys.argv)
+    # 显式指定目录（--samples / 位置参数 / 环境变量）时只认它，
+    # 不再偷偷拿桌面上的真机程序 —— 否则「换台机器跑同一份回归」结果不一样。
+    explicit = ("--samples" in sys.argv or os.environ.get("SYNTEC_SAMPLES")
+                or (len(sys.argv) > 1 and not sys.argv[1].startswith("-")))
     files = [os.path.join(samples, f) for f in sorted(os.listdir(samples))
              if f.endswith(".lad")] if os.path.isdir(samples) else []
-    real = [p for p in (os.path.join(os.path.expanduser("~"), "Desktop", "cnc.lad"),
-                        os.path.join(os.path.expanduser("~"), "Desktop", "cnc_1.lad"))
-            if os.path.isfile(p)]
+    real = [] if explicit else [
+        p for p in (os.path.join(os.path.expanduser("~"), "Desktop", "cnc.lad"),
+                    os.path.join(os.path.expanduser("~"), "Desktop", "cnc_1.lad"))
+        if os.path.isfile(p)]
     files = real or files
     if not files:
         print("  [SKIP] 没有可用的 .lad 语料")

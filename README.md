@@ -1,5 +1,7 @@
 # syntec-plc-ladder
 
+**当前版本** MCP `v0.11.1` · 技能包 `v1.4.0` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+
 让 AI 读懂、修改、生成 **新代（SYNTEC）CNC 梯形图 `.lad` 文件**的 MCP 服务，
 外加一份完整的[文件格式逆向文档](TECHNICAL.md)。
 
@@ -8,7 +10,7 @@
 - **写**：用自然语言让 AI 拼出合法的二进制 `.lad`，用新代 PLC 编辑器打开就能看
 - **纯 Python 标准库**，零依赖，Windows / macOS / Linux 都能跑
 - **附带技能包** `skill/syntec-plc/`：把这个 MCP 用起来的「操作手册」，
-  装到 WorkBuddy 里，AI 就知道该先查地址、该怎么避开双线圈、注释为什么要转繁体
+  装到 WorkBuddy 里，AI 就知道该先查地址、该怎么避开双线圈和重复元件、注释为什么要转繁体
 
 > 这个项目是**黑盒逆向**的产物：没有官方格式文档，全部规则来自
 > 「编辑器造样本 → 十六进制差分 → 全量真实程序回归验证」。
@@ -20,19 +22,22 @@
 
 ```
 ├── TECHNICAL.md                      # .lad 文件格式技术文档（重点）
-├── syntec-ladder-mcp-standalone.py   # 单文件版，直接能用
+├── 验证结果.txt                       # 本机跑完全部回归的原始输出
+├── syntec-ladder-mcp-standalone.py   # 单文件版，直接能用（零依赖）
+├── mcp-config.example.json           # MCP 客户端配置模板
 ├── src/                              # 源码
 │   ├── mcp_server.py                 # MCP 服务端（12 个工具）
 │   ├── syntec_lad.py                 # 单元编码 / 解码
 │   ├── syntec_layout.py              # 布局引擎：网络树 → 网格
 │   ├── syntec_parse.py               # 反序列化：网格 → 网络树
 │   ├── syntec_read.py                # 整文件读取 / 无损载入
-│   ├── syntec_model.py               # 工程模型
+│   ├── syntec_model.py               # 工程模型 + validate + 地址查询
+│   ├── syntec_address_db.py/.json    # 8 类元件 / 602 条标准地址 / C-S 方向 / R 区权限
 │   ├── syntec_re.py                  # 早期解码器（报告用）
-│   ├── syntec_address_db.py/.json    # 602 条标准地址库 + C/S/R 地址权限模型
+│   ├── syntec_annotation.py          # 解析编辑器导出的注解档 CUSCMT_*.dat
 │   └── build_bundle.py               # 打包单文件版
-├── tools/                            # 验证脚本 (含 verify_comments.py 注释编码验证)
-├── samples/                          # 编辑器手工产出的测试样本
+├── tools/                            # 验证脚本 + 打包脚本
+├── samples/                          # 10 个编辑器样本 + 1 个生成的并联演示
 ├── docs/                             # 逆向过程记录
 └── skill/syntec-plc/                 # AI 技能包：让 AI 会写新代 PLC
 ```
@@ -123,7 +128,7 @@ MCP 只提供**能力**（读写 `.lad` 的 12 个工具），不给**判断力*
 skill/syntec-plc/
 ├── SKILL.md                        # 工作流 + 硬约束 + 反模式清单
 ├── references/
-│   ├── address-map.md              # C/S 全表(各 512 点) + R 分配表, 从厂商手册抽取
+│   ├── address-map.md              # 8 类元件表 + C/S 全表(各 512 点) + R 分配与权限 + 参数区
 │   ├── element-grammar.md          # add_rung 的完整元件语法、地址规则、定时器 K 值换算
 │   ├── patterns.md                 # 12 个机床工艺模式（启保停/自动手动/锁存报警/单次动作/互锁…）
 │   ├── lad-format.md               # 字节结构速查，排错用
@@ -143,11 +148,14 @@ WorkBuddy 的技能目录是 `~/.workbuddy/skills/`（用户级，所有项目�
 或项目内的 `.workbuddy/skills/`（跟仓库走）。
 
 ```bash
-# 方式一：从仓库直接复制
+# 方式一（推荐）：从仓库直接复制，内容永远和代码同步
 cp -r skill/syntec-plc ~/.workbuddy/skills/
 
-# 方式二：用打包好的 zip
-unzip syntec-plc.zip -d ~/.workbuddy/skills/
+# 方式二：用打包好的 zip（Release 里下载，或自己打一份）
+unzip syntec-plc-skill-v1.4.0.zip -d ~/.workbuddy/skills/
+
+# 自己打包（仓库根目录执行，同时产出仓库包和技能包）
+python tools/package.py
 ```
 
 装完后重启会话，技能列表里会出现 `syntec-plc`。
@@ -229,7 +237,17 @@ AI 会调 `load_lad` → `add_rung` → `validate` → `save`。
 
 ## 验证
 
-四层指标，全量语料（13 个文件 / 2139 编辑行）：
+四层指标。**仓库自带的 11 个样本（clone 下来就能复跑）**：
+
+```
+11 个文件 / 69 编辑行 / 60 条 rung / 6 个并联块 / 15 个分支
+
+结构往返一致   60 / 60
+自检通过       60 / 60
+几何与原件相同  58 / 60   （其中逐字节相同 51）
+```
+
+开发环境另加 2 份真实机床程序（87 KB / 99 KB，不在仓库），合计 13 个文件 / 2139 编辑行：
 
 ```
 1188 条 rung / 705 个并联块 / 1793 个分支
@@ -250,22 +268,50 @@ AI 会调 `load_lad` → `add_rung` → `validate` → `save`。
 python tools/selftest.py                        # 自带数据，不需要样本
 python tools/roundtrip_full.py                  # 用 samples/ 里的语料
 python tools/verify_samples.py                  # 元件逐字节验证
-python tools/verify_parallel.py                  # 并联结构验证
-python tools/verify_comments.py                  # 注释编码验证(自带样例 + 真机语料)
+python tools/verify_parallel.py                 # 并联结构验证
+python tools/verify_comments.py                 # 注释编码验证(自带样例 + 真机语料)
+python tools/verify_address.py                  # 地址权限 / 同址驱动回归
 
 # 换成自己的样本目录
 python tools/roundtrip_full.py --samples D:/my_lad
+python tools/verify_address.py --samples D:/my_lad
 set SYNTEC_SAMPLES=D:/my_lad
 ```
 
-缺样本**不会**静默跳过：非可选样本缺失记 FAIL 并返回非 0 退出码。
+
+---
+
+## 打包
+
+改完代码要发人时，别手动挑文件：
+
+```bash
+python tools/package.py                  # 产物出到 dist/
+python tools/package.py --out ~/Desktop  # 出到桌面，方便发给别人
+```
+
+两个 zip：
+
+| 文件 | 内容 |
+|---|---|
+| `syntec-plc-ladder-v<ver>.zip` | 整个仓库（不含 `.git` / `dist` / `__pycache__`），内嵌技能包 |
+| `syntec-plc-skill-v<ver>.zip` | 技能包单独分发，解压到 `~/.workbuddy/skills/` |
+
+版本号分别读 `src/build_bundle.py` 的 `VERSION` 和 `SKILL.md` 的 `version`，不用手填。
+打完会解压到临时目录实跑两遍：`--selftest` 和 `tools/e2e_mcp.py`——
+**zip 打得开不算数，能从压缩包里起服务、写文件、读回来才算**。
 
 ---
 
 ## 关于 samples/
 
-`samples/` 里是**用新代编辑器手工造出来的最小样本**，每个文件只验证一类元件
-（触点 / 线圈 / 算术 / 逻辑 / 比较 / 搬移 / 定时器 / 计数器 / 流程 / 并联）。
+`samples/` 里是 **10 个用新代编辑器手工造出来的最小样本**，每个文件只验证一类元件
+（触点 / 线圈 / 算术 / 逻辑 / 比较 / 搬移 / 定时器 / 计数器 / 流程 / 并联），
+外加 **1 个由本工具生成的** `demo_parallel.lad`。
+
+最后这个要单独说明：它是我们自己的产物，只能验证「写出去再读回来一致」，
+**不能**当「编辑器认可的排版」的标准答案 —— 那是自我循环。
+涉及排版的结论都以编辑器样本和真机程序为准。
 
 真实机床程序（约 87KB 和 99KB 的两份 `cnc.lad`）**不在仓库里**——
 那里面是具体的刀库和 CNC 逻辑，属于设备资产，不适合公开。

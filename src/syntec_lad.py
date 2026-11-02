@@ -453,11 +453,12 @@ def roundtrip(path):
     return ok, len(d), len(enc)
 
 if __name__=='__main__':
+    import os
     files=['B_coils','B_compare','B_contacts','B_logic','B_math','B_move']
-    base=r'C:\Users\panming\Desktop'
+    base=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'samples')
     if len(sys.argv)>1:
         files=sys.argv[1:]; base=''
     for f in files:
-        p=f if f.endswith('.lad') else f"{base}\\{f}.lad"
+        p=f if f.endswith('.lad') else os.path.join(base, f"{f}.lad")
         try: show(open(p,'rb').read(), f)
         except FileNotFoundError: print(f"\n===== {f} ===== NOT FOUND")

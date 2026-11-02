@@ -43,7 +43,7 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "可选, 默认保存路径, 如 C:\\\\Users\\\\panming\\\\Desktop\\\\cnc_generated.lad"}
+                "path": {"type": "string", "description": "可选, 默认保存路径, 如 C:/work/cnc_generated.lad"}
             }
         },
     },
@@ -534,7 +534,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.11.0"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.11.1"},
         }
     if method == "ping":
         return {}
