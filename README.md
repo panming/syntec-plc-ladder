@@ -59,7 +59,7 @@ python syntec-ladder-mcp-standalone.py --selftest
 ### 方式 B：源码版
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/<你的账号>/syntec-plc-ladder.git
 cd syntec-plc-ladder
 python tools/selftest.py
 ```
@@ -92,6 +92,15 @@ python tools/selftest.py
 
 > Windows 路径在 JSON 里要写成双反斜杠，或者干脆全用正斜杠 `/`（Python 同样认）。
 > 如果提示找不到 `python`，把 `command` 换成 `py`（Windows 启动器）或 `python3`。
+
+### 装好之后，用一句话确认
+
+改完配置要**重启客户端**，然后新开对话说：
+
+> 用 syntec-ladder 新建一个梯形图：I100 串 (I101 | I102) 驱动 O200，加 END，存到 D:/tmp/test.lad
+
+能返回「已添加第 N 条 rung」并真的写出文件，就说明 MCP 通了。
+如果 AI 说没有这个工具，先看客户端日志里 MCP 有没有启动失败（多半是 `python` 路径不对）。
 
 ---
 
