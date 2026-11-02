@@ -237,7 +237,8 @@ def read_ladder(path):
                 rec.update(elements=None, ok=False, why=why,
                            shape='multi' if multi else 'bridge',
                            loads=loads,
-                           note=('%d 个负载共用一个条件段 —— 可读取、可审查, '
+                           note=('%d 个输出挤在一条 rung 上，使能条件互相交织 '
+                                 '(不是同一段条件的并联分支) —— 可读取、可审查, '
                                  '保存时原样保留' % len(loads)) if multi else
                                 f'{why} —— 可读取、可审查, 保存时原样保留')
         else:
