@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # 项目零依赖，不需要 pip install
+      - name: 端到端自检
+        run: python tools/selftest.py
+
+      - name: 元件逐字节
+        run: python tools/verify_samples.py
+
+      - name: 并联结构
+        run: python tools/verify_parallel.py
+
+      - name: 注释编码
+        run: python tools/verify_comments.py
+
+      - name: 地址权限 / 同址驱动
+        run: python tools/verify_address.py --samples samples
+
+      - name: 全量往返（仓库自带样本）
+        run: python tools/roundtrip_full.py
+
+      - name: 单文件版自检
+        run: python syntec-ladder-mcp-standalone.py --selftest
+
+      - name: MCP 端到端（起进程走 JSON-RPC）
+        run: python tools/e2e_mcp.py
+
+      - name: 技能包独立可用
+        shell: bash
+        run: |
+          python skill/syntec-plc/scripts/check_lad.py samples/B_branch.lad
+          python skill/syntec-plc/assets/build_program.py
+          python skill/syntec-plc/scripts/check_lad.py demo.lad

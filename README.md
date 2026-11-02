@@ -301,6 +301,10 @@ python tools/package.py --out ~/Desktop  # 出到桌面，方便发给别人
 打完会解压到临时目录实跑两遍：`--selftest` 和 `tools/e2e_mcp.py`——
 **zip 打得开不算数，能从压缩包里起服务、写文件、读回来才算**。
 
+> zip 里的中文文件名按 UTF-8 记录（`0x800` 标志）。Windows 资源管理器、7-Zip、
+> macOS 归档工具都正常；Git Bash 自带的老版 Info-ZIP `unzip`（6.00, 2009）不认这个标志，
+> 会把 `验证结果.txt` 显示成乱码 —— 加 `unzip -O UTF-8` 或换 7-Zip 即可。
+
 ---
 
 ## 关于 samples/
