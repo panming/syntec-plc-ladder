@@ -278,6 +278,11 @@ python tools/verify_address.py --samples D:/my_lad
 set SYNTEC_SAMPLES=D:/my_lad
 ```
 
+缺样本**不会**静默跳过：非可选样本缺失记 FAIL 并返回非 0 退出码；
+真机程序是可选的，缺失只记 SKIP。
+
+推上去之后，GitHub Actions 会在 **Ubuntu / Windows × Python 3.10 / 3.12** 上
+跑同一套脚本（`.github/workflows/ci.yml`），外加「技能包单独解压也能用」的检查。
 
 ---
 
@@ -338,6 +343,7 @@ python tools/roundtrip_full.py --samples D:/my_ladder_backup
 | 比较 `LE` / `GE` | 没找到编码，可能要靠交换操作数实现 |
 | 单条 rung | 最多 64 行（实测最大 59 行 / 52 分支） |
 | 间接定址 | 掩码位已定位，无实测用例 |
+| `A` 段掉电行为 | 手册只写「只有 On/Off 两态」，没写是否保持；要跨断电记住的**数值**请用 `R` 保持区 |
 
 更细的边界见 [TECHNICAL.md 第 10 节](TECHNICAL.md#10-未知与限制)。
 

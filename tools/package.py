@@ -79,6 +79,13 @@ def build_zip(src, prefix, out_path, extra=(), skip_names=()):
     return len(items) + len(extra)
 
 
+def read_readme_version():
+    """README 顶部写着「MCP `vX.Y.Z`」，改了代码忘改这里，朋友看到的版本就是错的。"""
+    s = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    m = re.search(r"MCP `v([^`]+)`", s)
+    return m.group(1) if m else None
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -156,6 +163,11 @@ def main():
 
     print(f"syntec-plc-ladder  v{ver}   技能包 v{sver}")
     print("-" * 66)
+
+    rv = read_readme_version()
+    if rv != ver:
+        print(f"[FAIL] README 顶部写的是 v{rv}，源码里是 v{ver} —— 先改 README")
+        return 1
 
     # 1) 技能包先打，供仓库包内嵌
     n_skill = build_zip(SKILL_DIR, "syntec-plc", nested)
