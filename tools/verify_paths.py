@@ -47,6 +47,47 @@ def labels_of(terms):
     return s
 
 
+def self_checks():
+    """三条判定各造一个必中的例子 —— 检查项本身也要有测试,
+    否则它可能悄悄退化成「永远不报」而没人发现。
+
+      O10: I100 串过来        -> 有条件, 正常
+      O11: 直接接母排          -> 空项, 恒真(无条件输出)
+      O12: A1 与 /A1 串联      -> 恒假, 永远不会动作
+    """
+    import tempfile
+    import syntec_model as M
+
+    C = lambda a, n="NO": {"kind": "contact", "norm": n, "addr": a}   # noqa: E731
+    K = lambda a: {"kind": "coil", "norm": "NO", "addr": a}          # noqa: E731
+
+    p = M.LadderProject()
+    p.add_rung(elements=[C("I100"), K("O10")])
+    p.add_rung(elements=[K("O11")])
+    p.add_rung(elements=[C("A1"), C("A1", "NC"), K("O12")])
+    p.add_rung(elements=[{"kind": "end"}])
+    path = os.path.join(tempfile.gettempdir(), "syntec_paths_selfcheck.lad")
+    p.save(path)
+
+    rows = load_rows(path)
+    res = PA.analyze(rows, 0, 2)
+    got = {L["addr"]: L for L in res["loads"]}
+
+    cases = [
+        ("有条件", lambda: got["=O10"]["terms"] == [("CONTACT", "NO", M.addr_bits("I100"))]
+         or len(got["=O10"]["terms"]) == 1),
+        ("无条件判恒真", lambda: any(not t for t in got["=O11"]["terms"])),
+        ("A·/A 判恒假", lambda: not got["=O12"]["terms"] and bool(got["=O12"]["dead"])),
+    ]
+    bad = []
+    for name, fn in cases:
+        ok = bool(fn())
+        print(f"  [{'OK ' if ok else 'FAIL'}] 自检: {name}")
+        if not ok:
+            bad.append(name)
+    return bad
+
+
 def check_file(path, samples=SAMPLES, rng=None):
     rng = rng or random.Random(20261102)
     rows = load_rows(path)
@@ -93,6 +134,10 @@ def check_file(path, samples=SAMPLES, rng=None):
 
 
 def main():
+    print("判定自检（恒真 / 恒假 / 有条件）")
+    base_fail = self_checks()
+    print()
+
     files = sys.argv[1:]
     if not files:
         here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -112,9 +157,12 @@ def main():
             print(f"    × R{idx}: {why}")
 
     print()
-    if total_fail:
-        print(f"失败 {total_fail} / {total_checked} 条 —— 两套算法结果不一致，"
-              f"说明路径枚举有 bug，桥式/多负载上的结论不可信")
+    if total_fail or base_fail:
+        if base_fail:
+            print(f"判定自检失败: {base_fail}")
+        if total_fail:
+            print(f"失败 {total_fail} / {total_checked} 条 —— 两套算法结果不一致，"
+                  f"说明路径枚举有 bug，桥式/多负载上的结论不可信")
         return 1
     print(f"全部一致（{total_checked} 条）—— 路径枚举与树模型在可对照的部分等价")
     return 0
