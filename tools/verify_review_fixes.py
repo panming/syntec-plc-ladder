@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""回归：2026-11-02 审 cnc.lad(80KB 版) 时查出的 6 个工具缺陷。
+"""回归：2026-11-02/03 审 cnc.lad 系列时查出的 7 个工具缺陷。
 
 1. render_line 把 8 字符标签砍成 7 字符（=R590.14 显示成 =R590.1）
 2. AXIAL 里 R7{i} / R9{i} 没补零，lookup('R73') 谎报成「轴3速度」
@@ -8,12 +8,16 @@
 4. 所有 warn 一律写成「手册标保留」
 5. R40~R49 警报输出位没线圈时被当成普通悬空触点报「警告」
 6. 把串联定时器/运算块说成「不阻断、后面每个扫描都执行」(语义反了)
+7. logic_probe §8b 把「条件全为取反报警位」的无报警信号 (=A225 <- /R44.x…)
+   误识别成报警汇总 —— 正/负触点没分开，全机 22 条纯噪音
 
 用法: python tools/verify_review_fixes.py
 """
 import json
 import os
+import subprocess
 import sys
+import tempfile
 
 sys.stdout.reconfigure(encoding="utf-8")
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -105,6 +109,57 @@ def main():
         "alarm_unused" in rv_src and 'rep.add("提示", f"{len(alarm_unused)}' in rv_src)
     chk("不再宣称串联功能块不阻断",
         "不会阻断" not in rv_src and "每个扫描都执行" not in rv_src)
+
+    # ---- 7 「无报警」信号不被误识别成报警汇总 ----
+    # cnc_2.lad 实例: =A225 <- /R44.2·/R44.0·/R44.1·/R44.7·/R44.4 是「无报警」
+    # (all-clear) 信号, 串在 =C0 的互锁里; 旧 §8b 连取反触点一起抓, 把它
+    # 认成报警汇总, 于是「22 个位未纳入汇总」全是噪音。
+    try:
+        probe = M.LadderProject()
+        probe.add_rung(elements=[
+            {"kind": "contact", "norm": "NC", "addr": "R44.0"},
+            {"kind": "contact", "norm": "NC", "addr": "R44.1"},
+            {"kind": "contact", "norm": "NC", "addr": "R44.2"},
+            {"kind": "contact", "norm": "NC", "addr": "R44.3"},
+            {"kind": "contact", "norm": "NC", "addr": "R44.4"},
+            {"kind": "coil", "norm": "NO", "addr": "A100"},
+        ])
+        probe.add_rung(elements=[
+            {"kind": "contact", "norm": "NO", "addr": "R44.5"},
+            {"kind": "contact", "norm": "NO", "addr": "R44.6"},
+            {"kind": "contact", "norm": "NO", "addr": "R44.7"},
+            {"kind": "contact", "norm": "NO", "addr": "R44.8"},
+            {"kind": "contact", "norm": "NO", "addr": "R44.9"},
+            {"kind": "coil", "norm": "NO", "addr": "A200"},
+        ])
+        probe.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "I1"},
+                                 {"kind": "coil", "norm": "NO", "addr": "R44.0"}])
+        probe.add_rung(elements=[{"kind": "contact", "norm": "NO", "addr": "I2"},
+                                 {"kind": "coil", "norm": "NO", "addr": "R44.5"}])
+        probe.add_rung(elements=[{"kind": "end"}])
+        tmp = os.path.join(tempfile.gettempdir(), "allclear_probe.lad")
+        outp = os.path.join(tempfile.gettempdir(), "allclear_dump.txt")
+        probe.save(tmp)
+        r = subprocess.run([sys.executable, os.path.join(_HERE, "logic_probe.py"),
+                            tmp, "--out", outp],
+                           capture_output=True, cwd=os.path.join(_HERE, ".."))
+        dump = open(outp, encoding="utf-8").read() if os.path.isfile(outp) else ""
+        chk("探针进程成功", r.returncode == 0, r.stderr.decode("utf-8", "replace")[:200])
+        if dump:
+            sec = dump[dump.find("--- 8b."):]
+            chk("只识别到 1 个汇总线圈 (A200, 不含 A100)",
+                "识别到报警汇总线圈: 1 个" in sec and "=A200" in sec)
+            chk("A100 归入「无报警」信号", "无报警」信号" in sec and "=A100" in sec)
+            chk("A100 的取反覆盖位列出 R44.0",
+                "R44.0" in sec.split("=A100")[1].split("=A2")[0] if "=A100" in sec else False)
+            unblock = " ".join(l for l in sec.split("=A100")[1].split("\n\n")[0].splitlines()
+                               if "不拦截" in l) if "=A100" in sec else ""
+            chk("A100 的不拦截位是 R44.5 (被驱动且不在取反表)",
+                "R44.5" in unblock and "R44.0" not in unblock, unblock)
+        else:
+            chk("logic_probe 产出可读", False, "dump 为空")
+    except Exception as exc:                                   # noqa: BLE001
+        chk("all-clear 探针不炸", False, repr(exc))
 
     bad = [c for c in CHECKS if not c[1]]
     for name, ok, detail in CHECKS:

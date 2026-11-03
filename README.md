@@ -158,6 +158,7 @@ MCP 只提供**能力**（读写 `.lad` 的 13 个工具），不给**判断力*
 | 把串联定时器/运算块当恒通，下游条件少一个 AND 项 | 手册 1-2.10 / 1-2.7：定时器到时、运算为真才导通；`verify_series_blocks.py` 用真值表锁住 |
 | `R40~R49` 警报输出位没线圈，被误报成悬空触点 | 手册 1-5：警报未启用属正常，工具降为提示 |
 | 报警汇总只覆盖到 `R46`，后加的 `R47/R49` 报警只弹文字、不亮红灯/不 Feed Hold | `logic_probe.py` §8b 列出「被驱动但未纳入汇总」的报警位（`K0<R4x` 只写到 R46 是历史累加） |
+| 「无报警」信号（条件全为取反的报警位）被误识别成报警汇总，22 条纯噪音 | §8b 区分正/负触点；all-clear 单列并反报「哪些报警亮起时不拦截」，`verify_review_fixes.py` 回归 |
 | 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |
 
 ---
@@ -280,7 +281,7 @@ python tools/verify_addr_conflicts.py --chm "CNC and PLC Interface-ZH-CN.chm"   
 python tools/verify_paths.py                    # 路径枚举 vs 串并联树
 python tools/verify_multi_coil.py               # 一条 rung 多个线圈
 python tools/verify_r_iface.py                  # R512~R1023 逐条权限
-python tools/verify_review_fixes.py             # 审查工具自身的六个历史缺陷回归
+python tools/verify_review_fixes.py             # 审查工具自身的七个历史缺陷回归
 python tools/verify_alarm_xml.py --selftest     # 报警 XML 对账（合成用例）
 python tools/verify_series_blocks.py            # 串联功能块是条件（真值表）
 python tools/review_ladder.py 我的程序.lad       # 静态体检一份现成程序（语法/地址/结构）

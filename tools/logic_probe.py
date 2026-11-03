@@ -201,12 +201,18 @@ def main():
             driven_alarm.add("%s.%s" % (m.group(1), m.group(2)))
     driven_alarm = {"R" + x for x in driven_alarm}
     summaries = []
+    allclears = []
     for rec in all_loads:
         txt = rec[3]
         regs = set(re.findall(r"K0<R(4[0-9])", txt))
-        bits = set(re.findall(r"R4[0-9]\.\d+", txt))
-        if len(regs) + len(bits) >= 5:
-            summaries.append((rec[0], rec[2], regs, bits))
+        # 正触点: 前面不能是 '/' —— /R44.2 是取反, 全取反的线圈是「无报警」信号
+        pos = set(re.findall(r"(?<!/)R4[0-9]\.\d+", txt))
+        neg = set(re.findall(r"/(R4[0-9]\.\d+)", txt))
+        if not regs and not pos and len(neg) >= 5:
+            allclears.append((rec[0], rec[2], neg))
+            continue
+        if len(regs) + len(pos) >= 5:
+            summaries.append((rec[0], rec[2], regs, pos))
     S.append("被驱动的 Alarm/Warning 位: %d 个" % len(driven_alarm))
     S.append("识别到报警汇总线圈: %d 个" % len(summaries))
     for k, addr, regs, bits in summaries:
@@ -219,6 +225,18 @@ def main():
                      (len(uncovered), ", ".join(uncovered)))
         else:
             S.append("    被驱动位全部纳入汇总")
+    if allclears:
+        S.append("识别到「无报警」信号 (条件全为取反的报警位, 常串在 Cycle Start 互锁): %d 个" %
+                 len(allclears))
+        for k, addr, neg in allclears:
+            S.append("  R%03d %-8s 覆盖(取反)位 %d 个: %s" % (
+                k, addr, len(neg), ", ".join(sorted(neg))))
+            # 取反位对应的报警亮起 -> 信号断开 (拦截);
+            # 不在取反列表里的被驱动报警亮起 -> 信号不变, 不拦截
+            unblocked = sorted(a for a in driven_alarm if a not in neg)
+            if unblocked:
+                S.append("    ** 这些被驱动报警位亮起时该信号不断开 (不拦截): %s" %
+                         ", ".join(unblocked))
 
     S.append("\n--- 9. 地址注释（按段）---")
     for a in sorted(comments, key=lambda x: (x[0], int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0)):
