@@ -2,7 +2,8 @@
 
 **当前版本** `v0.13.3` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
 
-> 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
+> 配套的 AI 技能包（教 AI 怎么写才不炸）已随仓库发布，在 [`skill/syntec-plc/`](skill/syntec-plc/)，
+> 见[下文](#配套技能包)。
 
 让 AI 读懂、修改、生成 **新代（SYNTEC）CNC 梯形图 `.lad` 文件**的 MCP 服务，
 外加一份完整的[文件格式逆向文档](TECHNICAL.md)。
@@ -42,6 +43,7 @@
 │   ├── syntec_annotation.py          # 解析编辑器导出的注解档 CUSCMT_*.dat
 │   └── build_bundle.py               # 打包单文件版
 ├── tools/                            # 验证脚本 + 打包脚本
+├── skill/syntec-plc/                 # 配套 AI 技能包：SKILL.md + 7 份参考 + 2 个脚本 + 模板
 ├── samples/                          # 10 个编辑器样本 + 1 个生成的并联演示
 └── docs/                             # 逆向过程记录
 ```
@@ -128,18 +130,39 @@ python tools/selftest.py
 
 ---
 
-## 配套技能包（暂未随仓库发布）
+## 配套技能包
 
 MCP 只提供**能力**（读写 `.lad` 的 13 个工具），不给**判断力**。
 同一个工具，AI 可能写出「一个 `O` 挂三个线圈」，也可能拿 `R` 的位当中间继电器——
 这两类错都能生成**语法合法**的文件，到现场才炸。
 
 配套技能包就是补这部分：把「怎么写才对」固化下来——硬约束表、8 类元件分工、
-12 个已验证的机床工艺模式、注释编码规则、强制三层验证流程。
+12 个已验证的机床工艺模式、注释编码规则、强制三层验证流程，以及从四台真机程序
+反推出来的现场约定（地址怎么分、报警怎么锁、手自动怎么共存）。
 
-> **当前状态**：技能包 `v1.7.1` 已完成并在作者本机使用，但**没有随本仓库发布**，
-> `git clone` 下来看不到 `skill/` 目录。等它定稿后会单独放到 Release，
-> 届时这里会补上安装命令。本文下面的坑位表说明它具体挡什么。
+**用法**：把整个目录拷进支持 `SKILL.md` 的客户端技能目录。
+
+```bash
+cp -r skill/syntec-plc ~/.workbuddy/skills/
+```
+
+`SKILL.md` 开头的 `description` 决定触发时机：提到新代 / `.lad` / 梯形图 / PLC 程序，
+或具体功能（润滑、液压站、排屑、刀库、M 码、报警锁存）时会自动加载。
+
+| 文件 | 管什么 |
+|---|---|
+| `SKILL.md` | 给模型的执行指令：地址三分法、硬约束、三层注释、三层验证、21 条反模式 |
+| `references/function-library.md` | 功能写法库：润滑 / 液压站 / 排屑与 9 件冷却辅机 / 刀库刀塔 / M 码 |
+| `references/project-conventions.md` | 现场约定：地址分区、`I`/`O` 一点一义、`R13`~`R18`、程序骨架 |
+| `references/patterns.md` | 12 个工艺模式：自保持、手自动、锁存报警、单次动作、互锁… |
+| `references/element-grammar.md` | `add_rung` 的元件字段与并联嵌套写法 |
+| `references/address-map.md` | C/S 全表（各 512 点）、R 区权限、内部标志该放哪 |
+| `references/comment-encoding.md` | cp950 规则与简繁对照 |
+| `references/lad-format.md` | 字节结构，排错时用 |
+| `scripts/check_lad.py` · `zh_tw.py` | 字节体检 / 注释转繁体，零依赖 |
+| `assets/build_program.py` | MCP 不可用时的离线生成模板 |
+
+完整的文件说明、依据分级、覆盖范围见 [`skill/syntec-plc/README.md`](skill/syntec-plc/README.md)。
 
 ### 它挡掉了哪些坑
 
@@ -163,6 +186,12 @@ MCP 只提供**能力**（读写 `.lad` 的 13 个工具），不给**判断力*
 | 报警汇总只覆盖到 `R46`，后加的 `R47/R49` 报警只弹文字、不亮红灯/不 Feed Hold | `logic_probe.py` §8b 列出「被驱动但未纳入汇总」的报警位（`K0<R4x` 只写到 R46 是历史累加） |
 | 「无报警」信号（条件全为取反的报警位）被误识别成报警汇总，22 条纯噪音 | §8b 区分正/负触点；all-clear 单列并反报「哪些报警亮起时不拦截」，`verify_review_fixes.py` 回归 |
 | 只看格式通过就说「验证完了」 | 强制三层验证：validate → 文本回读 → 时序仿真 |
+| 把「正转自保持、反转点动」当不一致去统一 | 排屑反转是清屑点动，松手即停是安全要求；`function-library.md` §3.2 说明为什么不该改，也不该往点动里加超时 |
+| 油冷机跟着 `M30` / 急停一起停 | 主轴停了温度还要降，油冷跟着停会把热变形留在主轴和刀柄上——它是辅机里唯一的例外 |
+| 辅机漏挂 `M09` / `M30`，程序跑完泵还在转 | 每件水气的输出链上都要串；`function-library.md` §3.4 |
+| 按「某功能必须占某段地址」硬排 | 只要求同功能点位连成一段、功能之间不重叠；`A200`~`A299` 内部怎么切没有规定 |
+| 过载信号直接进报警位，启动瞬间跳假报警 | 热继电器上电会抖几个扫描周期，先过 2 秒定时器 |
+| 报警只自锁不切断，或只切断不自锁 | 两样都要：条件串在输出链上 + 报警位锁存到复位 |
 
 ---
 
@@ -397,6 +426,8 @@ python tools/roundtrip_full.py --samples D:/my_ladder_backup
 - [docs/lad_roundtrip_report.md](docs/lad_roundtrip_report.md) —— 全量往返验证报告
 - [docs/unknown_inventory.md](docs/unknown_inventory.md) —— 未解编码清单
 - [docs/r512-r1023-权限表.md](docs/r512-r1023-权限表.md) —— R512~R1023 逐条权限（含推断依据与风险点）
+- [skill/syntec-plc/README.md](skill/syntec-plc/README.md) —— 配套技能包说明：文件地图、
+  依据分级（实测 / 手册 / 真机惯例 / 推断 / 已被推翻）、功能覆盖范围、维护约定
 
 ## License
 
