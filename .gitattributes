@@ -9,5 +9,7 @@
 # .lad 是二进制，禁止任何转换
 *.lad binary
 
-# Windows 批处理必须是 CRLF，否则 cmd 解析 label/goto 会出错
-*.bat text eol=crlf
+# Windows 批处理必须是 CRLF，且必须按原字节存进仓库：
+# 用 text eol=crlf 会把它在仓库里存成 LF，从 GitHub 下 ZIP 拿到的是 LF 版，
+# 而 cmd 解析 label/goto 对 LF 不可靠。所以直接关掉换行转换。
+*.bat -text
