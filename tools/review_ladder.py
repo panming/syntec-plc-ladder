@@ -121,23 +121,43 @@ def check_coils(coils, rep):
         rs = [r for k, r in uses if k == "RST"]
 
         if len(no) > 1:
-            bad.append(f"`{a}` 用普通线圈驱动了 {len(no)} 次（rung {fmt(no)}）"
+            bad.append(f"`{a}` 用普通线圈驱动了 {len(no)} 次（{eds(no)}）"
                        f"—— 后一条会把前一条覆盖掉")
         if len(st) > 1:
-            bad.append(f"`{a}` 置位 {len(st)} 次（rung {fmt(st)}）—— 多余，只会增加读图难度")
+            bad.append(f"`{a}` 置位 {len(st)} 次（{eds(st)}）—— 多余，只会增加读图难度")
         if len(rs) > 1:
-            bad.append(f"`{a}` 复位 {len(rs)} 次（rung {fmt(rs)}）")
+            bad.append(f"`{a}` 复位 {len(rs)} 次（{eds(rs)}）")
         if st and no:
             rep.add("警告", f"`{a}` 同时用置位和普通线圈",
-                    f"置位 rung {fmt(st)}，普通线圈 rung {fmt(no)}")
+                    f"置位在 {eds(st)}，普通线圈在 {eds(no)}")
         if no and nc:
-            bad.append(f"`{a}` 既有常开线圈（rung {fmt(no)}）又有常闭线圈（rung {fmt(nc)}）"
+            bad.append(f"`{a}` 既有常开线圈（{eds(no)}）又有常闭线圈（{eds(nc)}）"
                        f"—— 典型是复制粘贴后忘了改地址")
     return bad
 
 
 def fmt(rows):
     return "、".join(str(x) for x in rows)
+
+
+# ---- rung 号 -> 编辑器行号 ----
+# 报告是给人看的, 人只在编辑器里按行号找位置; "rung 137" 对现场没有意义。
+# 所有对外输出统一走 ed()/eds(), 内部仍用 rung 索引做去重和排序。
+EROW = {}
+
+
+def ed(ri):
+    """单个 rung -> '行 1097' / '行 1097-1122'"""
+    r = EROW.get(ri)
+    if not r:
+        return f"R{ri}"
+    a, b = r
+    return f"行 {a}" if a == b else f"行 {a}-{b}"
+
+
+def eds(ris):
+    """一组 rung -> '行 1097、行 1102'"""
+    return "、".join(ed(x) for x in sorted(set(ris)))
 
 
 # check_write 的 warn 有好几种成因, 得分别给标题和建议, 不能一锅端。
@@ -228,6 +248,9 @@ def main():
 
     d = R.read_ladder(args.lad)
     rep = Report()
+    EROW.clear()
+    EROW.update({r["index"]: (r["editor_row_start"], r["editor_row_end"])
+                 for r in d["rungs"]})
 
     # 行级数据：桥式 rung 也要采集线圈，否则会误报「没人驱动」
     import syntec_parse as PT
@@ -236,7 +259,7 @@ def main():
 
     print("=" * 78)
     print(os.path.basename(args.lad))
-    print("%d 条 rung、%d 行逻辑、%d 个并联块（最大 %d 分支）"
+    print("%d 段程序、%d 行逻辑、%d 个并联块（最大 %d 分支）"
           % (len(d["rungs"]), d["logic_rows"],
              d["stats"]["parallel_blocks"], d["stats"]["max_branch"]))
     print("=" * 78)
@@ -246,7 +269,7 @@ def main():
     for reg, uses in sorted(moves.items()):
         if len(uses) > 1:
             rep.add("警告", f"`{reg}` 被 {len(uses)} 处数据写入驱动",
-                    "rung " + "、".join(f"{r}({c})" for r, c, _ in uses)
+                    "、".join(dict.fromkeys(f"{ed(r)}({c})" for r, c, _ in uses))
                     + " —— 靠扫描顺序决定最终值，条件互斥才安全")
 
     # 1 解析失败的 rung
@@ -254,7 +277,7 @@ def main():
     if bad_rungs:
         multi = [r for r in bad_rungs if r.get("shape") == "multi"]
         rep.add("提示",
-                f"{len(bad_rungs)} 条 rung 折不成串并联树"
+                f"{len(bad_rungs)} 段程序折不成串并联树"
                 + (f"（{len(multi)} 条是多负载共用一段条件）" if multi else ""),
                 "已用路径枚举读出每个负载的条件，不再是盲区；"
                 "保存时这几条原样保留字节，不会被重排\n"
@@ -276,9 +299,9 @@ def main():
         rows_used = [r for _, r in uses]
         if kind in ("S", "T", "M"):
             ro.append(f"`{a}` 是 `{kind}` 段（核心→阶梯，只读），"
-                      f"rung {fmt(rows_used)} 却在驱动它")
+                      f"{eds(rows_used)} 却在驱动它")
         elif kind == "I":
-            ro.append(f"`{a}` 是输入点，rung {fmt(rows_used)} 却在驱动它")
+            ro.append(f"`{a}` 是输入点，{eds(rows_used)} 却在驱动它")
         elif kind == "R":
             # R512~R1023 现在有逐条表(syntec_r_iface), 直接问 check_write 就行。
             # 以前这里单独攒一批「请人工核对 1-1.4.4」—— 那张表做完之后这句提示
@@ -287,9 +310,9 @@ def main():
             # None, 这里也不报 —— 手册没定义不等于 CNC 不认。
             res = DB.check_write(a)
             if res and res[0] == "error":
-                ro.append(f"`{a}`：{res[1]}（rung {fmt(rows_used)}）")
+                ro.append(f"`{a}`：{res[1]}（{eds(rows_used)}）")
             elif res and res[0] == "warn":
-                warns[warn_kind(res[1])].append(f"`{a}`（rung {fmt(rows_used)}）")
+                warns[warn_kind(res[1])].append(f"`{a}`（{eds(rows_used)}）")
     for x in ro:
         rep.add("错误", x)
     # 别把所有 warn 一律说成「保留区」：cnc.lad 的 13 条其实是「拿 R 的位
@@ -315,7 +338,7 @@ def main():
         if a in driven or externally_driven(a):
             continue
         line = (f"`{a}` 被当作触点用了 {len(uses)} 次"
-                f"（rung {fmt(sorted({r for _, r in uses}))}），"
+                f"（{eds(sorted({r for _, r in uses}))}），"
                 f"但全文没有任何一处驱动它")
         (alarm_unused if is_alarm_bit(a) else dangling).append(line)
     for x in dangling:
@@ -328,18 +351,20 @@ def main():
                 "若该警报在本机未启用（现场已确认不影响程序正确性），属正常；"
                 "否则要补上驱动它的检测逻辑。工具只列事实，不判对错。")
 
-    # 5 比较块槽位：带 K 的 op，A 必须是常数、B 必须是寄存器
-    CMP_NAME = {0x5e: "GT", 0x62: "LT", 0x66: "EQ",
-                0x6a: "GTK", 0x6c: "LTK", 0x6e: "EQK"}
+    # 5 比较块槽位: A 槽是常数还是寄存器由 opcode 决定 (官方 CMPx_ConstantToR vs CMPx_RtoR),
+    #   常数变体的 A 必须真是常数、B 必须真是寄存器。
+    CMP_NAME = {0x5e: "CMP >", 0x62: "CMP <", 0x66: "CMP =",
+                0x6a: "CMP >(常数)", 0x6c: "CMP <(常数)", 0x6e: "CMP =(常数)"}
+    CMP_CONST_OP = (0x6a, 0x6c, 0x6e)
     for ri, op, A, B in cmps:
         name = CMP_NAME.get(op, f"0x{op:02x}")
         an, bn = R.num_to_operand(A, True), R.num_to_operand(B, False)
-        if name.endswith("K"):
+        if op in CMP_CONST_OP:
             if not str(an).startswith("#"):
-                rep.add("错误", f"rung {ri} 比较块 `{name}` 的 A 槽是 `{an}`，应为常数",
+                rep.add("错误", f"{ed(ri)} 比较块 `{name}` 的 A 槽是 `{an}`，应为常数",
                         "编辑器里 A 槽固定当常数，写成地址会变成「常数 = 地址号」")
             if str(bn).startswith("#"):
-                rep.add("错误", f"rung {ri} 比较块 `{name}` 的 B 槽是 `{bn}`，应为寄存器")
+                rep.add("错误", f"{ed(ri)} 比较块 `{name}` 的 B 槽是 `{bn}`，应为寄存器")
 
     # 6 定时器 / 计数器
     tpreset = collections.defaultdict(list)
@@ -348,10 +373,10 @@ def main():
     for k, uses in sorted(tpreset.items()):
         if len(uses) > 1:
             rep.add("错误", f"TM/CT {k} 在 {len(uses)} 处被驱动",
-                    "rung " + fmt([r for r, _, _ in uses]))
+                    "、".join(ed(r) for r in sorted({r for r, _, _ in uses})))
         for ri, tag, el in uses:
             if el[5] == 0:
-                rep.add("警告", f"rung {ri} 的 TM/CT {k} 预设为 0",
+                rep.add("警告", f"{ed(ri)} 的 TM/CT {k} 预设为 0",
                         "预设 0 等于立即到，通常是想读参数却读空了")
 
     # 7 参数注释里的参数号是否自洽

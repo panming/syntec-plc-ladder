@@ -23,11 +23,11 @@ import syntec_re as R
 
 COLS = 10
 
-# RTS / FEND 在编辑器 opcode 属性表里 bi 位也是 1, 但序列化时只写 4 字节(无参数)。
-# 若按 bi 当 8 字节解析, 会把后面一格吞进参数区, 整行错位一格。
-# 实测依据: cnc_1.lad 的 RTS 行 = 00 d0 00 00 + 9 个横线格, 正好 10 格。
-# (END 不同, 它确实是双格, 见 syntec_lad.enc_el 的说明。)
-FLOW_4BYTE = (0xd0, 0xfd)            # RTS / FEND
+# RTS 在官方 opcode 属性表里 bi 位也是 1, 但真机上它后面紧跟的是横线格
+# (00 d0 00 00 | 00 0d 00 00 | ...), 按 8 字节解析会把那条横线吞掉、
+# 整行右移一格, 重新生成时就不是原字节了。所以只有 RTS 按 4 字节读。
+# (END / FEND 相反: 第 2 格确实是保留区 00 00 00 00, 必须按 8 字节读。)
+FLOW_4BYTE = (0xd0,)                 # 仅 RTS
 
 
 def is_wide(op):
@@ -43,11 +43,9 @@ def decode_cell(op, raw):
     if op == 0x0d:
         return ('WIRE',)
     if op == 0xcf:
-        return ('END',)
+        return ('END', b'')
     if op == 0xd0:
         return ('FLOW4', 0xd0)
-    if op == 0xfd:
-        return ('FLOW4', 0xfd)
     if op in (0x01, 0x03):
         return ('CONTACT', 'NO' if op == 0x01 else 'NC', raw[2] | (raw[3] << 8))
     if op in (0x09, 0x0a):                     # 定时器触点: 编号只占 1 字节
@@ -63,8 +61,8 @@ def decode_cell(op, raw):
 
 def decode_block(op, buf):
     """8 字节单元 -> 语义元组"""
-    if op == 0xcf:                    # END 是双格块 (后 4 字节保留), 不是带标签的流程块
-        return ('END',)
+    if op == 0xcf:                    # END 是双格块: 第 2 格(字节4~7)是保留区, 原样带上
+        return ('END', bytes(buf[4:8]))
     info = R.op_info(op)
     if not info:
         return ('RAW', bytes(buf))
@@ -73,9 +71,13 @@ def decode_block(op, buf):
     B = buf[4] | (buf[5] << 8)
 
     if g == 'Function':
+        # 官方 fun_fun_title 只有 fn0~fn10 有名字 (其余是 "none", 属遗留码),
+        # 遇到就原样保留, 不要抛 KeyError 把整份文件读崩。
         cat = {0: 'MATH', 1: 'MATH', 2: 'MATH', 3: 'MATH',
                4: 'CMP', 5: 'CMP', 6: 'CMP',
-               7: 'MOVE', 8: 'LOGIC', 9: 'LOGIC', 10: 'LOGIC'}[f]
+               7: 'MOVE', 8: 'LOGIC', 9: 'LOGIC', 10: 'LOGIC'}.get(f)
+        if cat is None:
+            return ('RAW', bytes(buf))
         return ('FB', cat, op, A, B, bytes(buf[4:8]))
     if g == 'Timer':
         return ('FB', 'TIMER', op, A, 0, bytes(buf[4:8]))

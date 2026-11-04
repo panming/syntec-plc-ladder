@@ -99,7 +99,7 @@ def main():
     chk("校验无告警", "校验通过" in text(8), text(8))
     chk("保存成功", "已保存" in text(9), text(9))
     chk("read_ladder 返回元件", '"kind": "coil"' in text(10) or '"kind":"coil"' in text(10))
-    chk("load_lad 载入 4 条 rung", "rung 4" in text(11), text(11))
+    chk("load_lad 载入 4 段", "4 段" in text(11), text(11))
     chk("dump_rungs 有 parallel", '"parallel"' in text(12), text(12)[:200])
 
     a = open(OUT1, "rb").read() if os.path.isfile(OUT1) else b""

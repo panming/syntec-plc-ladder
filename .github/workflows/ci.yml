@@ -32,6 +32,14 @@ jobs:
       - name: 端到端自检
         run: python tools/selftest.py
 
+      # 基准不是我们的假设，是官方编辑器反编译出来的常量表：
+      # EOpcode_V1（80 个操作码）、plcop_map[256]（group/func/双格/操作数类型）、
+      # 各 *Converter 的字段布局、LadderView 的绘制顺序。
+      # 这一项挡住过：FEND 被当单格导致整行右移、END 保留区被清零、
+      # 计数器预设只写 8 位、比较块 op1 一律当常数、SUB 被标成加号。
+      - name: 与官方编辑器一致
+        run: python tools/verify_official.py
+
       - name: 元件逐字节
         run: python tools/verify_samples.py
 

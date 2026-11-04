@@ -23,6 +23,9 @@ cnc_1.lad
 cnc_saved.lad
 *.local.lad
 
+# WorkBuddy 会话数据
+.workbuddy/
+
 # 自检产物
 syntec_selftest*.lad
 verify_gen*.lad

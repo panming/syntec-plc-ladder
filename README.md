@@ -1,6 +1,6 @@
 # syntec-plc-ladder
 
-**当前版本** `v0.13.2` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
+**当前版本** `v0.13.3` ｜ [验证结果.txt](验证结果.txt) 是全部回归的原始输出
 
 > 配套的 AI 技能包（教 AI 怎么写才不炸）**暂未随本仓库发布**，见[下文说明](#配套技能包暂未随仓库发布)。
 
@@ -12,9 +12,12 @@
 - **写**：用自然语言让 AI 拼出合法的二进制 `.lad`，用新代 PLC 编辑器打开就能看
 - **纯 Python 标准库**，零依赖，Windows / macOS / Linux 都能跑
 
-> 这个项目是**黑盒逆向**的产物：没有官方格式文档，全部规则来自
-> 「编辑器造样本 → 十六进制差分 → 全量真实程序回归验证」。
-> 逆向过程、编码表、排版规则都写在 [TECHNICAL.md](TECHNICAL.md) 里。
+> 这个项目是**逆向**的产物：没有官方格式文档。结论来自两条互相校验的路线：
+> 「编辑器造样本 → 十六进制差分 → 全量真实程序回归验证」，以及
+> **反编译官方编辑器 `MLCEdit.exe` 直接读它的操作码表和元件类**。
+> 两者冲突时以官方程序集为准，再回去找字节证据解释差异。
+> 逆向过程、编码表、排版规则都写在 [TECHNICAL.md](TECHNICAL.md) 里，
+> 对齐留档在 [§9.5](TECHNICAL.md#95-与官方编辑器反编译实现的对齐)。
 
 ---
 
@@ -100,7 +103,7 @@ python tools/selftest.py
 
 > 用 syntec-ladder 新建一个梯形图：I100 串 (I101 | I102) 驱动 O200，加 END，存到 D:/tmp/test.lad
 
-能返回「已添加第 N 条 rung」并真的写出文件，就说明 MCP 通了。
+能返回「已在末尾添加第 N 段」并真的写出文件，就说明 MCP 通了。
 如果 AI 说没有这个工具，先看客户端日志里 MCP 有没有启动失败（多半是 `python` 路径不对）。
 
 ---
@@ -112,15 +115,15 @@ python tools/selftest.py
 | `new_ladder` | 新建/清空工程，可指定默认保存路径 |
 | `load_lad` | **读入**已有 `.lad`；不改动的行原样锁定，保存后逐字节相同 |
 | `read_ladder` | **只读**解析任意 `.lad`：结构文本或元件列表（JSON） |
-| `dump_rungs` | 把当前工程的 rung 导出成元件列表 |
+| `dump_rungs` | 把当前工程的程序段导出成元件列表（带编辑器行号） |
 | `lookup_address` | 查标准地址含义（`C36`、`急停`、`主轴倍率`），给裸字直接返回元件定义（`A`、`S`、`R`、`CT`、`TM`） |
-| `add_rung` | 追加一行：串联条件 + 结果元件，或给完整元件列表（含并联） |
+| `add_rung` | 追加一段：串联条件 + 结果元件，或给完整元件列表（含并联） |
 | `set_comment` | 给地址加设备变量注释（ct=4，挂在地址上，不占行）|
 | `add_comment_line` | 在梯形图前加整行注释（ct=1，占编辑器行号）|
 | `validate` | 结构校验：缺 END、地址越界、无输出元件、双线圈 / 重复元件、定时器重号 |
 | `preview` | 把当前工程回显成文本 |
 | `save` | 写出 `.lad`，返回路径与字节数 |
-| `explain_rung` | **解释一条 rung 什么时候才动作**：逐个负载给出布尔表达式（路径枚举，桥式/多线圈也能算）|
+| `explain_rung` | **解释一段程序什么时候才动作**：逐个负载给出布尔表达式（路径枚举，桥式/多线圈也能算）|
 | `explain_format` | 返回格式要点与已知限制 |
 
 ---
@@ -202,7 +205,7 @@ AI 会调 `add_rung` → `validate` → `save`。并联会自动展开成两行�
 `explain_rung` 返回：
 
 ```
-rung 187  (编辑器行 405-407, shape=multi, 6 个元件, 枚举 3 条通路)
+编辑器行 405-407  (shape=multi, 6 个元件, 枚举 3 条通路)
 
   =C1  ←  I113·/A18 + A9
       2 条通路
@@ -242,7 +245,7 @@ AI 会调 `load_lad` → `add_rung` → `validate` → `save`。
 
 ## 验证
 
-四层指标。**仓库自带的 11 个样本（clone 下来就能复跑）**：
+四层指标 + 一层官方对账。**仓库自带的 11 个样本（clone 下来就能复跑）**：
 
 ```
 11 个文件 / 69 编辑行 / 60 条 rung / 6 个并联块 / 15 个分支
@@ -267,10 +270,26 @@ AI 会调 `load_lad` → `add_rung` → `validate` → `save`。
 元件摆在哪一列、哪里画横线、右边留几格全由人决定，同一个逻辑可以画成无数种合法布局。
 所以本项目采取的策略是「能复现的原样复现，不能复现的锁定原样」，而不是硬凑字节。
 
+在此之上还有一层**官方对账**：`tools/verify_official.py` 的期望值不写自己的假设，
+直接抄反编译出来的官方常量表（`EOpcode_V1` 的 80 个操作码、`plcop_map[256]`、
+各 `*Converter` 的字段布局）。9 组 50 项，含 85 个官方码逐个解码/编码不崩、
+以及 3 份真机 + 11 个样本共 24 765 个单元零未知。
+
+这一层挡掉过的真错（细节见 [TECHNICAL.md §9.5](TECHNICAL.md#95-与官方编辑器反编译实现的对齐)）：
+
+| 错法 | 后果 |
+|---|---|
+| `FEND` 当成 4 字节 | 吞掉后面的横线格，整行往右错一格 |
+| `END` 第 2 格当空格 | 保留区被清零，编辑器打开后文件被改写 |
+| 计数器预设只写 1 字节 | 预设 >255 截断成错值 |
+| 比较块第一个操作数一律当常数 | `R961` 显示成 `#961`，条件读反 |
+| `0x33` 标成加号 | 减法显示成加法——最危险的一类 |
+
 自己复跑：
 
 ```bash
 python tools/selftest.py                        # 自带数据，不需要样本
+python tools/verify_official.py                 # 与官方反编译表逐条对账（50 项）
 python tools/roundtrip_full.py                  # 用 samples/ 里的语料
 python tools/verify_samples.py                  # 元件逐字节验证
 python tools/verify_parallel.py                 # 并联结构验证
@@ -279,7 +298,7 @@ python tools/verify_address.py                  # 地址权限 / 同址驱动回
 python tools/verify_addr_conflicts.py           # 手册/文档/代码 三方地址核对
 python tools/verify_addr_conflicts.py --chm "CNC and PLC Interface-ZH-CN.chm"   # 连手册一起查
 python tools/verify_paths.py                    # 路径枚举 vs 串并联树
-python tools/verify_multi_coil.py               # 一条 rung 多个线圈
+python tools/verify_multi_coil.py               # 一段程序多个线圈
 python tools/verify_r_iface.py                  # R512~R1023 逐条权限
 python tools/verify_review_fixes.py             # 审查工具自身的七个历史缺陷回归
 python tools/verify_alarm_xml.py --selftest     # 报警 XML 对账（合成用例）

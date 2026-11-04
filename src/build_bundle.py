@@ -27,7 +27,7 @@ MODULES = ["syntec_re", "syntec_lad", "syntec_layout", "syntec_r_iface",
            "syntec_address_db", "syntec_model", "syntec_parse", "syntec_paths",
            "syntec_read"]
 
-VERSION = "0.13.2"
+VERSION = "0.13.3"
 
 HEADER = '''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-

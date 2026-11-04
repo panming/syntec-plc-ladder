@@ -16,11 +16,12 @@ sys.stdout.reconfigure(encoding="utf-8")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(_HERE)
 OUT = os.path.join(ROOT, "验证结果.txt")
-VER = "0.13.2"
+VER = "0.13.3"
 
 SECTIONS = [
     ("端到端自检", ["tools/selftest.py"], "写 -> 存 -> 读 -> 再存, 逐项核对"),
     ("全量往返验证", ["tools/roundtrip_full.py"], "仓库自带样本逐字节往返"),
+    ("与官方编辑器一致", ["tools/verify_official.py"], "基准 = 反编译 MLCEdit.exe 的 EOpcode_V1 / plcop_map / *Converter"),
     ("元件逐字节", ["tools/verify_samples.py"], ""),
     ("并联结构", ["tools/verify_parallel.py"], ""),
     ("注释编码", ["tools/verify_comments.py"], "自带样例 + 真机语料"),
@@ -29,7 +30,7 @@ SECTIONS = [
     ("地址三方核对", ["tools/verify_addr_conflicts.py"], "手册/文档/代码"),
     ("R512~R1023 逐条权限", ["tools/verify_r_iface.py"], ""),
     ("路径枚举 vs 串并联树", ["tools/verify_paths.py"], ""),
-    ("一条 rung 多个线圈", ["tools/verify_multi_coil.py"], ""),
+    ("一段程序多个线圈", ["tools/verify_multi_coil.py"], ""),
     ("审查工具自身回归", ["tools/verify_review_fixes.py"], "标签截断/轴向地址/悬空误报/warn 措辞/警报位"),
     ("报警定义 XML 对账", ["tools/verify_alarm_xml.py", "--selftest"], "合成用例"),
     ("串联功能块是条件", ["tools/verify_series_blocks.py"], "定时器/运算块导通才有下游，含真值表"),

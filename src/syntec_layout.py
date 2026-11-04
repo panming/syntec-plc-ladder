@@ -343,8 +343,24 @@ FB_OP_SYM = {'ADD': '+', 'SUB': '-', 'MUL': '*', 'DIV': '/',
 
 
 def _opnd(v, imm):
-    """功能块操作数: 寄存器 R300 / 立即数 K5 (SYNTEC 习惯用 K 表示常数)"""
-    return f"K{v}" if imm else f"R{v}"
+    """功能块操作数: 寄存器 R300 / 常数 #5 (数值一律用 #, 与编辑器/手册一致)"""
+    return f"#{v}" if imm else f"R{v}"
+
+
+CMP_CONST_OP = (0x6a, 0x6c, 0x6e)     # op1 是 #常数的那三种; 其余 (0x5e/0x62/0x66) op1 是寄存器
+
+
+def flow_label(el):
+    """流程块 -> 编辑器里显示的文字 (JSR/LAB/JMP/MSG 带标签)"""
+    if el[0] == 'FLOW4':
+        op, raw = el[1], b''
+    else:
+        op, raw = el[1], (el[2] if len(el) > 2 else b'')
+    name = L.FLOW_NAME.get(op, f'FLOW{op:02X}')
+    if op in (0xca, 0xcb, 0xd4, 0xd5):
+        lb = bytes(raw).split(b'\x00')[0].decode('ascii', 'replace')
+        return f"{name} {lb}".strip()
+    return name
 
 
 def el_label(el):
@@ -353,9 +369,11 @@ def el_label(el):
     if k == 'WIRE':
         return '─' * 7          # 真实导线(0x0d), 铺满整格才看得出是一条连续的线
     if k == 'EMPTY':
-        return ''               # 空白格(0x00): 物理上同样导通, 但编辑器不画线, 保持留白
+        return ''               # 空白格(0x00): 真的没有导线, 电流不通过(分支短的一侧就靠它留空)
     if k == 'END':
         return 'END'
+    if k in ('FLOW4', 'FLOW8'):
+        return flow_label(el)
     if k == 'CONTACT':
         return dev_name(el[2]) if el[1] == 'NO' else '/' + dev_name(el[2])
     if k == 'COIL':
@@ -371,21 +389,23 @@ def el_label(el):
             lb = el[3] if len(el) > 3 else ''
             return f"{name} {lb}".strip()
         if cat == 'TIMER':
-            # 预设值来源有 K(常数) 和 R(寄存器) 两种, 都是同一个 opcode 家族的不同编号,
+            # 预设值来源有 #(常数) 和 R(寄存器) 两种, 都是同一个 opcode 家族的不同编号,
             # 早期一律画成 K, 看到 "TM1 K82" 会误以为预设常数是 82 —— 实际是 R82。
             src = next((s for (_p, s), t in L.TIMER_TYPE.items() if t == el[2]), 'K')
             v = (el[5][0] | el[5][1] << 8) if len(el) > 5 else 0
-            return f"TM{el[3]} {'R' if src == 'R' else 'K'}{v}"
+            return f"TM{el[3]} {'R' if src == 'R' else '#'}{v}"
         if cat == 'CNTR':
-            return f"CT{el[3]}"
+            src = next((s for (_d, s), t in L.CNTR_TYPE.items() if t == el[2]), 'K')
+            v = (el[5][0] | el[5][1] << 8) if len(el) > 5 else 0
+            return f"CT{el[3]} {'R' if src == 'R' else '#'}{v}"
         op = REV_NAME.get(el[2], str(el[2]))
         sym = FB_OP_SYM.get(op, op)
         imm = op.endswith('_IMM')
         if cat == 'CMP':
-            # 比较块的槽位是固定的: 左=常数、右=寄存器。别再按 _IMM 后缀猜 ——
-            # GTK/LTK/EQK 后缀是 K 不是 _IMM, 按 _IMM 判断会把两侧都画成 R。
-            # 直接照编辑器显示: 常数在左、寄存器在右, 方向就是左 op 右。
-            return f"{_opnd(el[3], True)}{sym}{_opnd(el[4], False)}"
+            # op1 是常数还是寄存器, 由 opcode 决定 (官方 CMPx_ConstantToR vs CMPx_RtoR),
+            # 不能一律当常数: 0x5e/0x62/0x66 的 A 槽是**寄存器**,
+            # 早期写成 K36>R52, 实际是 R36>R52, 判读会完全跑偏。
+            return f"{_opnd(el[3], el[2] in CMP_CONST_OP)}{sym}{_opnd(el[4], False)}"
         if cat == 'MOVE':
             return f"R{el[4]}={_opnd(el[3], imm)}"
         return f"{_opnd(el[4], False)}{sym}{_opnd(el[3], imm)}"

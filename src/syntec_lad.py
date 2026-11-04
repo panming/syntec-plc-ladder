@@ -5,24 +5,31 @@
   触点/线圈: b2=地址号, b3=族(触点=0, 线圈=2)
 功能块: 8 字节 [cell][param4], param=[B,0,0,0x80]; 计算 B = B OP A
 
-已知 4 字节类型:
-  0x00 空  0x0d 横线  0xcf END
+已知 4 字节类型 (EOpcode_V1, 反编译 MLCEdit.exe/Tools/Converter/EOpcode_V1.cs):
+  0x00 空  0x0d 横线
   0x01 常开接点  0x03 常闭接点
+  0x09 定时器常开触点 0x0a 定时器常闭触点  (操作数只占 1 字节)
+  0x0b 计数器常开触点 0x0c 计数器常闭触点
   0x0e 常开线圈 0x10 常闭线圈 0x05 正缘脉冲 0x07 负缘脉冲 0x12 Latch 0x14 Unlatch
-已知 8 字节(功能块)类型:
-  math:  0x21 ADD  0x27 ADD_IMM  0x33 SUB  0x45 MUL  0x57 DIV  (假设)
-  move:  0x72 MOV(reg)  0x70 MOV_IMM  (假设)
-  logic: 0x81 AND  0x93 OR  0xa5 XOR  (假设)
-  cmp :  0x5e 大于(>) 0x62 小于(<) 0x66 等于(=)   [寄存器 vs 寄存器]
-         0x6a 大于(>数值型) 0x6e 等于(=数值型)     [寄存器 vs 常数]   (均由编辑器实测确认)
+  0xd0 RTS  (官方 plcop 标 bi=1, 但真机上第 2 格是横线 0x0d, 见 FLOW_WIDE)
+已知 8 字节(功能块)类型 (完整表见 TYPE8, 由官方 plcop_map 推导):
+  math:  0x21 ADD_RtoR 0x27 ADD_Const 0x33 SUB_RtoR 0x39 SUB_Const
+         0x45 MUL_RtoR 0x4b MUL_Const 0x57 DIV_RtoR 0x5d DIV_Const
+  cmp :  0x5e CMP>  0x62 CMP<  0x66 CMP=      [op1=寄存器, op2=寄存器]
+         0x6a CMP>K 0x6c CMP<K 0x6e CMP=K      [op1=#常数,  op2=寄存器]
+  move:  0x70 MOV_Const 0x72 MOV_RtoR
+  logic: 0x81 AND 0x87 AND_K 0x93 OR 0x99 OR_K 0xa5 XOR 0xab XOR_K
+  tool:  0xb0 ROT
+  flow:  0xcb JSR 0xd5 LAB 0xca JMP 0xd4 MSG      [带 6 字节 ASCII 标签]
+         0xcf END 0xfd FEND                     [8 字节, 第 2 格为保留区]
   timer: 8 种变体(精度×源), 见 TIMER_TYPE; 参数块=[值低,值高,值低,0x80] 16位小端
 文件尾: [00 fe]; 无批注时网格后直接 00 fe。
 """
 import sys
 
 TYPE4 = {
-    0x00: 'EMPTY', 0x0d: 'WIRE', 0xcf: 'END',
-    0xd0: 'RTS', 0xfd: 'FEND',
+    0x00: 'EMPTY', 0x0d: 'WIRE',
+    0xd0: 'RTS',
     0x01: ('CONTACT','NO'), 0x03: ('CONTACT','NC'),
     0x09: ('CONTACT_T','NO'), 0x0a: ('CONTACT_T','NC'),   # 定时器触点 (编号 1 字节)
     0x0b: ('CONTACT_C','NO'), 0x0c: ('CONTACT_C','NC'),   # 计数器触点
@@ -31,19 +38,27 @@ TYPE4 = {
     0x12: ('COIL','LATCH'), 0x14: ('COIL','UNLATCH'),
 }
 TYPE8 = {
-    # 数学块: 8位操作数模式(小地址) 0x21/0x27/0x45/0x57 ; 16位操作数模式(大地址, cnc.lad真机) 0x33/0x4b/0x5d
-    0x21:'MATH',0x27:'MATH',0x33:'MATH',0x45:'MATH',0x4b:'MATH',0x57:'MATH',0x5d:'MATH',
-    0x5e:'CMP',0x62:'CMP',0x66:'CMP',0x6a:'CMP',0x6e:'CMP',
-    0x70:'MOVE',0x72:'MOVE',
-    0x81:'LOGIC',0x93:'LOGIC',0xa5:'LOGIC',
-    # 定时器变体 (精度×源, 全部由 B_timer.lad + 编辑器实测确认, 2026-10-31)
+    # ---- Function 组 fn0~fn10 (官方 fun_fun_title: ADD/SUB/MUL/DIV/CMP>/CMP</CMP=/MOV/AND/OR/XOR) ----
+    0x21:'MATH',0x27:'MATH',          # ADD  RtoR / Const
+    0x33:'MATH',0x39:'MATH',          # SUB  RtoR / Const
+    0x45:'MATH',0x4b:'MATH',          # MUL  RtoR / Const
+    0x57:'MATH',0x5d:'MATH',          # DIV  RtoR / Const
+    0x5e:'CMP', 0x62:'CMP', 0x66:'CMP',      # > < =  (op1=寄存器)
+    0x6a:'CMP', 0x6c:'CMP', 0x6e:'CMP',      # > < =  (op1=#常数)
+    0x70:'MOVE',0x72:'MOVE',          # MOV Const / RtoR
+    0x81:'LOGIC',0x87:'LOGIC',        # AND  RtoR / Const
+    0x93:'LOGIC',0x99:'LOGIC',        # OR   RtoR / Const
+    0xa5:'LOGIC',0xab:'LOGIC',        # XOR  RtoR / Const
+    0xb0:'ROT',                       # Tool 组 fn0
+    # ---- Timer 组 (精度×源) ----
     0xc5:'TIMER',0xe4:'TIMER',0xe3:'TIMER',0xe2:'TIMER',
     0xe7:'TIMER',0xc4:'TIMER',0xc3:'TIMER',0xc2:'TIMER',
-    # 计数器变体 (方向×源, 由 B_counter.lad 反推)
+    # ---- Counter 组 (方向×源) ----
     0xc6:'CNTR',0xc7:'CNTR',0xc9:'CNTR',0xe0:'CNTR',0xe1:'CNTR',
-    # 流程块 (8 字节, 带 6 字节 ASCII 标签)
-    0xcb:'FLOW',0xd5:'FLOW',
     0xe5:'CNTR',0xe6:'CNTR',0xe9:'CNTR',0xea:'CNTR',
+    # ---- Flow 组 (带 6 字节标签; END/FEND 为双格) ----
+    0xcb:'FLOW',0xd5:'FLOW',0xca:'FLOW',0xd4:'FLOW',
+    0xcf:'FLOW',0xfd:'FLOW',
 }
 
 # ---- 定时器类型映射 (精度, 源) 源: 'K'=常数  'R'=寄存器 ----
@@ -76,13 +91,15 @@ CNTR_LABEL  = {v: f'CT {d} {sr}'  for (d, sr), v in CNTR_TYPE.items()}
 
 COLS = 10
 
-CMP_SYMBOL = {0x5e:'>',0x62:'<',0x66:'=',0x6a:'>K',0x6e:'=K'}
-# 数学 opcode 对照 (2026-10-31 cnc.lad 真机实测修订):
-#   加: 0x21(8位) / 0x33(16位) ; 加立即数: 0x27
-#   乘: 0x45(8位) / 0x4b(16位) ; 除: 0x57(8位) / 0x5d(16位)
-MATH_SYMBOL = {0x21:'+',0x27:'+K',0x33:'+',0x45:'×',0x4b:'×',0x57:'÷',0x5d:'÷'}
-MOVE_SYMBOL = {0x72:'→',0x70:'←K'}
-LOGIC_SYMBOL = {0x81:'AND',0x93:'OR',0xa5:'XOR'}
+CMP_SYMBOL = {0x5e:'>',0x62:'<',0x66:'=',0x6a:'>',0x6c:'<',0x6e:'='}
+# 数学 opcode 对照 (2026-11-04 按官方 EOpcode_V1 复核):
+#   0x21 ADD(RtoR)  0x27 ADD(Const)   0x33 SUB(RtoR)  0x39 SUB(Const)
+#   0x45 MUL(RtoR)  0x4b MUL(Const)   0x57 DIV(RtoR)  0x5d DIV(Const)
+# 早期这张表把 0x33 写成 '+'、漏了 0x39, 还把 Const 变体写成 16 位操作数模式 —— 都错了。
+MATH_SYMBOL = {0x21:'+',0x27:'+',0x33:'-',0x39:'-',
+               0x45:'×',0x4b:'×',0x57:'÷',0x5d:'÷'}
+MOVE_SYMBOL = {0x72:'→',0x70:'→'}
+LOGIC_SYMBOL = {0x81:'AND',0x87:'AND',0x93:'OR',0x99:'OR',0xa5:'XOR',0xab:'XOR'}
 
 # ---- 类型映射 (2026-11-01 用 cnc.lad/cnc_1.lad 全量实测补齐 R/R 与 立即数 两类变体) ----
 CONTACT_TYPE = {'NO':0x01,'NC':0x03}
@@ -224,20 +241,31 @@ def enc_fb(cat, op, A, B, timer_param=b''):
           'CMP':CMP_TYPE,'ROT':TOOL_TYPE}[cat]
     return bytes([0,_code(ttab,op),A&0xff,(A>>8)&0xff])+bytes([B&0xff,(B>>8)&0xff,0,0x80])
 
+def _src(source):
+    """预设值来源归一化: '#'(常数) / 'R'(寄存器). 旧写法 'K' 等价于 '#'."""
+    return 'K' if source in ('K', '#') else source
+
+
 def enc_timer(precision, source, A, value):
-    """定时器 8 字节单元. precision: '1s'/'0.1s'/'0.01s'/'0.001s'; source: 'K'/'R'.
+    """定时器 8 字节单元. precision: '1s'/'0.1s'/'0.01s'/'0.001s'; source: '#'/'R'.
     value: 预设值(常数) 或 寄存器号(R, 显示值即寄存器号).
     参数块=[值低字节, 值高字节, 值低字节, 0x80]; 值为 16 位小端整数 (源 B_timer.lad 实测)."""
-    typ = TIMER_TYPE[(precision, source)]
+    typ = TIMER_TYPE[(precision, _src(source))]
     v = value & 0xffff
     param = bytes([v & 0xff, (v >> 8) & 0xff, v & 0xff, 0x80])
     return bytes([0, typ, A & 0xff, (A >> 8) & 0xff]) + param
 
 def enc_counter(direction, source, A, X):
-    """计数器 8 字节单元. direction: 'UP'/'DOWN'/'RESET'/'RING_UP'/'RING_DOWN'; source:'K'/'R'.
-    X: 预设值(#N) 或 寄存器号(R). 参数块=[X, 0, 0, 0x80]."""
-    typ = CNTR_TYPE[(direction, source)]
-    param = bytes([X & 0xff, 0, 0, 0x80])
+    """计数器 8 字节单元. direction: 'UP'/'DOWN'/'RESET'/'RING_UP'/'RING_DOWN'; source:'#'/'R'.
+    X: 预设值(#N) 或 寄存器号(R).
+
+    官方 CounterConverter 的 arg2 = BytesToUShort(m_byteArg2[0], m_byteArg2[1]),
+    也就是 **16 位**。早期这里只写了 X & 0xff，预设值超过 255 会被静默截断
+    (解码读 16 位、编码写 8 位, 往返必然对不上)。参数块=[X低, X高, 0, 0x80]。
+    """
+    typ = CNTR_TYPE[(direction, _src(source))]
+    v = X & 0xffff
+    param = bytes([v & 0xff, (v >> 8) & 0xff, 0, 0x80])
     return bytes([0, typ, A & 0xff, (A >> 8) & 0xff]) + param
 
 # ---- 流程控制 (8 字节; 标签为 6 字节 ASCII, 不足补 0) ----
@@ -249,13 +277,15 @@ def enc_counter(direction, source, A, X):
 FLOW_TYPE = {'JMP':0xca, 'JSR':0xcb, 'MSG':0xd4, 'LAB':0xd5,
              'RTS':0xd0, 'END':0xcf, 'FEND':0xfd}
 FLOW_NAME = {v: k for k, v in FLOW_TYPE.items()}
-# 宽度: JSR/LAB 带 6 字节标签 => 8 字节(2 列); RTS/FEND 无标签 => 4 字节(1 列)
-#   cnc_1.lad 实测: LAB "001"=[00 d5 30 30 31 00 00 00] (8B)
-#                   RTS       =[00 d0 00 00] (4B, 后接普通连接线)
-# 带标签的流程块才占双格(8 字节, 6 字节标签); RTS/FEND/END 无参数, 只占 1 格。
-# 注意: 编辑器 opcode 属性表里这些的 bi 位也是 1, 但序列化时确实只写 4 字节 ——
-# 实测 cnc_1.lad 的 RTS 后面紧跟的是横线格 00 0d 00 00, 说明第 2 格不归它。
-FLOW_WIDE = {'JMP':1, 'JSR':1, 'MSG':1, 'LAB':1, 'RTS':0, 'FEND':0, 'END':0}
+# 宽度 (真机逐字节实测, 2026-11-04 复核):
+#   JSR/LAB/JMP/MSG 带 6 字节标签      => 8 字节(2 格)
+#   END / FEND      双格, 第 2 格是保留区(常 0, M2I1653 的 END 为 00 00 00 80) => 8 字节
+#   RTS             单格, 后面紧跟横线 0x0d                                  => 4 字节
+# 注意 1: 官方 plcop_map 里 Flow 组全部 bi=1, 但真机 RTS 后面确实是横线格,
+#         按 8 字节读会吞掉那条横线并让整行错位一格 —— 文件字节优先。
+# 注意 2: 早期把 FEND 也当 4 字节, 结果重新生成时把保留格写成 00 0d 00 00,
+#         整行右移一格 (roundtrip 的 [bytes] 差异就是它)。FEND 必须 8 字节。
+FLOW_WIDE = {'JMP':1, 'JSR':1, 'MSG':1, 'LAB':1, 'RTS':0, 'FEND':1, 'END':1}
 
 def enc_flow(op, label=''):
     """op: 'JSR'/'LAB'/'RTS'/'FEND'/'END'/'JMP'/'MSG'; label: 标签(≤6 字节 ASCII)"""
@@ -292,10 +322,11 @@ def enc_el(el):
         return bytes([0, el[1], 0, 0])
     if k == 'END':
         # END 在编辑器里是双格块: 后 4 字节是保留区。
-        # 实测 cnc.lad 的 END 单元 = 00 cf 00 00 00 00 00 80,
-        # samples/B_branch.lad 的 = 00 cf 00 00 00 00 00 00 —— 结构完全相同, 只是保留字节不同。
-        # RTS / FEND 则确实只占 1 格 (后面紧跟横线), 两者不一样, 别合并处理。
-        return bytes([0, 0xcf, 0, 0, 0, 0, 0, 0])
+        # 实测 cnc.lad 的 END 单元 = 00 cf 00 00 00 00 00 00,
+        # M2I1653 的 = 00 cf 00 00 00 00 00 80 —— 保留区不总是 0, 不能一律写 0,
+        # 反序列化时把原样 4 字节带到 el[1], 编码时照抄回去。
+        tail = bytes(el[1])[:4] if len(el) > 1 and el[1] else b'\x00\x00\x00\x00'
+        return bytes([0, 0xcf, 0, 0]) + tail.ljust(4, b'\x00')
     if k in ('EMPTY', 'WIRE', 'CONTACT', 'COIL'):
         return enc_4(el)
     if k == 'CONTACT_T':

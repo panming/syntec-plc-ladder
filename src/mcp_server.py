@@ -124,16 +124,16 @@ TOOLS = [
             "  {kind:'coil', norm:'NO'|'NC'|'RP'|'FP'|'LATCH'|'UNLATCH', addr:'O10'}\n"
             "  {kind:'contact_t', norm:'NO'|'NC', index:27}   // 定时器触点 TM27\n"
             "  {kind:'contact_c', norm:'NO'|'NC', index:5}    // 计数器触点 CT5\n"
-            "  {kind:'timer', name:'TM100', precision:'1s'|'0.1s'|'0.01s'|'0.001s', source:'K'|'R', preset:60}\n"
-            "      // precision=精度; source='K' 预设常数 / 'R' 预设取寄存器(此时 preset 填寄存器号, 如 300=R300)\n"
+            "  {kind:'timer', name:'TM100', precision:'1s'|'0.1s'|'0.01s'|'0.001s', source:'#'|'R', preset:60}\n"
+            "      // precision=精度; source='#' 预设常数 / 'R' 预设取寄存器(此时 preset 填寄存器号, 如 300=R300)\n"
             "      // 要给操作员改的时间用参数区: {source:'R', preset:'R81'} = 系统参数 3401, 阶梯只读\n"
-            "  {kind:'counter', name:'CT3', direction:'UP'|'DOWN'|'RESET'|'RING_UP'|'RING_DOWN', source:'K'|'R', preset:50}\n"
+            "  {kind:'counter', name:'CT3', direction:'UP'|'DOWN'|'RESET'|'RING_UP'|'RING_DOWN', source:'#'|'R', preset:50}\n"
             "  {kind:'math', op:'ADD'|'SUB'|'MUL'|'DIV'|'ADD_IMM', A:'R200', B:'R201'}  // 语义: B = B op A\n"
             "  {kind:'move', op:'MOV'|'MOV_IMM', A:'R220', B:'R221'}      // 语义: B = A\n"
             "  {kind:'logic', op:'AND'|'OR'|'XOR', A:'R230', B:'R231'}   // 语义: B = B op A\n"
             "  {kind:'compare', op:'GT'|'LT'|'EQ', A:'R210', B:'R211'}   // 比较块(作触点): A op B, 两边都是寄存器\n"
             "  {kind:'compare', op:'GTK'|'LTK'|'EQK', A:'#5', B:'R210'}  // 带K: 常数在A、寄存器在B, 方向是 '左 op 右'\n"
-            "      // 所以 R210>5 要写 LTK(A='#5', B='R210') —— 编辑器里显示 K5 < R210\n"
+            "      // 所以 R210>5 要写 LTK(A='#5', B='R210') —— 编辑器里显示 #5 < R210\n"
             "      // 写成 GTK(A='R210', B='#5') 会被拒绝: 编辑器会把地址号当常数, 变成恒假条件\n"
             "  {kind:'parallel', branches:[[元件...],[元件...], ...]}   // 并联分支, 至少 2 个; 每个分支内部是串联, 可再嵌 parallel\n"
             "      // 例: I100 串联 (I101 | I102) 后驱动 O200\n"
@@ -272,29 +272,45 @@ def h_new_ladder(args):
     return f"已重置工程。默认保存路径: {PROJECT.path}"
 
 
+# 段序号 -> (起始编辑器行, 结束编辑器行); 对外一律报编辑器行号
+EDITOR_ROWS = {}
+
+
+def row_span(i):
+    r = EDITOR_ROWS.get(i)
+    if not r:
+        return f"（新加的第 {i} 段）"
+    a, b = r
+    return str(a) if a == b else f"{a}-{b}"
+
+
 def h_load_lad(args):
     path = args.get("path")
     if not path or not os.path.exists(path):
         return f"文件不存在: {path}"
     keep = args.get("keep_geometry", True)
     info, kept = RD.load_into(PROJECT, path, keep_geometry=keep)
+    EDITOR_ROWS.clear()
+    EDITOR_ROWS.update({r["index"]: (r["editor_row_start"], r["editor_row_end"])
+                        for r in info["rungs"]})
     editable = sum(1 for x in PROJECT.rungs if x is not None)
     st = info['stats']
     lines = [
         f"已载入 {info['path']}",
-        f"  大小 {info['size']} 字节 / 逻辑行 {info['logic_rows']} / rung {info['rung_count']}"
+        f"  大小 {info['size']} 字节 / 逻辑行 {info['logic_rows']} / {info['rung_count']} 段"
         f" / 文件版本 {info['version']}",
         f"  并联块 {st['parallel_blocks']} 个 (分支 {st['branches']}, 最多 {st['max_branch']} 路)",
         f"  设备变量注释 {len(info['comments'])} 条",
-        f"  可编辑 rung {editable} 条 / 锁定原样 {info['rung_count'] - editable} 条",
+        f"  可编辑 {editable} 段 / 锁定原样 {info['rung_count'] - editable} 段",
     ]
     if kept:
         why = {}
         for _i, w in kept:
             why[w.split(' ')[0]] = why.get(w.split(' ')[0], 0) + 1
         lines.append("  锁定原因: " + ", ".join(f"{k}×{v}" for k, v in why.items()))
-        nums = [str(i) for i, _w in kept[:30]]
-        lines.append("  锁定 rung: " + ", ".join(nums) + (" ..." if len(kept) > 30 else ""))
+        nums = [row_span(i) for i, _w in kept[:30]]
+        lines.append("  锁定段所在编辑器行: " + ", ".join(nums)
+                     + (" ..." if len(kept) > 30 else ""))
         lines.append("  (锁定行保存时原样写回; 要改它们请在编辑器里改, 或用 keep_geometry=false 全量重排)")
     lines.append("提示: 载入后直接 save 会与原文件逐字节相同; add_rung 会追加到末尾。")
     return "\n".join(lines)
@@ -318,7 +334,7 @@ def h_read_ladder(args):
     info = RD.read_ladder(path)
     sel = [r for r in info['rungs']
            if r['index'] >= start and (end is None or r['index'] <= int(end))][:limit]
-    out = [f"{info['path']}  ({info['size']} 字节, {info['rung_count']} 条 rung, "
+    out = [f"{info['path']}  ({info['size']} 字节, {info['rung_count']} 段程序, "
            f"{info['logic_rows']} 逻辑行, 版本 {info['version']})"]
     if fmt in ("text", "both"):
         out.append(RD.render_file(path, start=sel[0]['index'] if sel else start,
@@ -326,7 +342,7 @@ def h_read_ladder(args):
     if fmt in ("json", "both"):
         brief = []
         for r in sel:
-            item = {"rung": r['index'], "row": f"{r['row_start']}-{r['row_end']}",
+            item = {"editor_rows": f"{r['editor_row_start']}-{r['editor_row_end']}",
                     "ok": r['ok'], "shape": r.get('shape'),
                     "elements": r['elements'] if r['ok'] else None}
             if not r['ok']:
@@ -336,7 +352,7 @@ def h_read_ladder(args):
             brief.append(item)
         out.append(json.dumps(brief, ensure_ascii=False, indent=1))
     if len(info['rungs']) > (sel[-1]['index'] if sel else 0):
-        out.append(f"... 共 {info['rung_count']} 条, 用 start/end/limit 查看更多")
+        out.append(f"... 共 {info['rung_count']} 段, 用 start/end/limit 查看更多")
     return "\n".join(out)
 
 
@@ -354,11 +370,11 @@ def h_dump_rungs(args):
             break
         n += 1
         if els is None:
-            out.append(json.dumps({"rung": i, "locked": True,
+            out.append(json.dumps({"editor_rows": row_span(i), "locked": True,
                                    "note": "原样保留的原始行, 不可用元素列表表达"},
                                   ensure_ascii=False))
         else:
-            out.append(json.dumps({"rung": i, "elements": els},
+            out.append(json.dumps({"editor_rows": row_span(i), "elements": els},
                                   ensure_ascii=False, indent=1))
     return "\n".join(out) if out else "当前工程为空。"
 
@@ -391,8 +407,8 @@ def h_add_rung(args):
     n = PROJECT.rung_row_count()[-1]
     total = sum(PROJECT.rung_row_count())
     extra = f" (含并联, 展开为 {n} 行)" if n > 1 else ""
-    return (f"已添加第 {idx} 条 rung{extra}。"
-            f"当前共 {len(PROJECT.rungs)} 条 rung / {total} 个编辑器行。")
+    return (f"已在末尾添加第 {idx} 段{extra}。"
+            f"当前共 {len(PROJECT.rungs)} 段 / {total} 个编辑器行。")
 
 
 def h_add_comment_line(args):
@@ -465,15 +481,15 @@ def h_explain_rung(args):
             hit = r
             break
     if hit is None:
-        return (f"没找到 rung={want_rung} row={want_row}; "
-                f"该文件共 {info['rung_count']} 条 rung")
+        return (f"没找到 rung={want_rung} / 编辑器行={want_row}; "
+                f"该文件共 {info['rung_count']} 段程序")
 
     logic, _others, _tail = RD.split_records(open(path, 'rb').read())
     rows = [P.decode_row(x) for x in logic]
     res = PA.analyze(rows, hit['row_start'] - 1, hit['row_end'] - 1)
 
-    out = [f"rung {hit['index']}  (编辑器行 {hit['editor_row_start']}-{hit['editor_row_end']}, "
-           f"shape={hit.get('shape')}, {res['n_edges']} 个元件, 枚举 {res['n_paths']} 条通路)"]
+    out = [f"编辑器行 {hit['editor_row_start']}-{hit['editor_row_end']}"
+           f"  ({hit.get('shape')}, {res['n_edges']} 个元件, 枚举 {res['n_paths']} 条通路)"]
     if not res['loads']:
         out.append("这条 rung 没有输出元件（空白行或只有流程块）。")
         return "\n".join(out)
@@ -613,7 +629,7 @@ def _dispatch(method, rid, params):
         return {
             "protocolVersion": "2024-11-05",
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "syntec-ladder", "version": "0.13.2"},
+            "serverInfo": {"name": "syntec-ladder", "version": "0.13.3"},
         }
     if method == "ping":
         return {}
@@ -643,7 +659,7 @@ def _error(code, msg):
 def _force_utf8_stdio():
     """MCP 走 stdio 传 JSON，协议规定是 UTF-8。
 
-    Windows 英文版的控制台默认 cp1252，一旦返回带中文的结果（"已添加第 N 条 rung"）
+    Windows 英文版的控制台默认 cp1252，一旦返回带中文的结果（"已在末尾添加第 N 段"）
     就会 UnicodeEncodeError 直接崩，客户端只看到「服务没响应」。
     这里显式把三个流都锁成 UTF-8，让服务端不再依赖宿主 locale。
     """

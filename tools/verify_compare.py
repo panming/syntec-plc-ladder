@@ -13,7 +13,7 @@ A 槽 = 常数，B 槽 = 寄存器，比较方向就是「左 op 右」。
   1. cmp_reg_const 的语义映射（寄存器 op 常数 → 编辑器要的写法）
   2. 旧写法必须被拒绝，不能静默生成
   3. 往返后 A 侧仍带 # 前缀（类型不能丢）
-  4. 渲染出来的文本和编辑器一致（K5 < R210，不是 R210 > K5）
+  4. 渲染出来的文本和编辑器一致（#5 < R210，不是 R210 > #5）
 """
 import os
 import sys
@@ -91,9 +91,10 @@ def main():
 
     print("\n4. 渲染与编辑器一致")
     txt = R.render_file(path)
-    for want in ("K5<R210", "K5>R210", "K5==R210"):
+    # 2026-11-04: 数值常量统一改用 # (用户规范: 常数写 #N, 不写 KN)。
+    for want in ("#5<R210", "#5>R210", "#5==R210"):
         check(want in txt, "渲染出现 %s" % want, txt.strip().splitlines()[:6])
-    check("R210>K5" not in txt, "不再出现反过来的 R210>K5")
+    check("R210>#5" not in txt and "R210>K5" not in txt, "不再出现反过来的 R210>#5")
 
     print("\n" + "=" * 70)
     if fails:

@@ -66,9 +66,10 @@ def main():
 
     for k, r in enumerate(info["rungs"], 1):
         a, b = r["row_start"] - 1, r["row_end"] - 1
-        er = "%d-%d" % (r["editor_row_start"], r["editor_row_end"])
+        _a, _b = r["editor_row_start"], r["editor_row_end"]
+        er = str(_a) if _a == _b else "%d-%d" % (_a, _b)
         res = PA.analyze(rows, a, b)
-        head = "R%03d (编辑 %s)" % (k, er)
+        head = "行 %s" % er
         if not res["loads"]:
             L.append("%s | (无负载)" % head)
             continue
@@ -92,14 +93,14 @@ def main():
     S.append("被多处线圈驱动的地址: %d 个" % len(multi))
     for key in sorted(multi, key=lambda x: (x[0], int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0)):
         v = multi[key]
-        S.append("  %-10s %d 处: %s" % (key, len(v), ", ".join("R%d(行%s)" % (x[0], x[1]) for x in v)))
+        S.append("  %-10s %d 处: %s" % (key, len(v), "、".join(dict.fromkeys("行%s" % x[1] for x in v))))
 
     S.append("\n--- 2. 同一寄存器被多个功能块写入（MOVE/MATH）---")
     fbw = {k: v for k, v in gates.items() if len(v) > 1}
     S.append("被多处写入的寄存器: %d 个" % len(fbw))
     for key in sorted(fbw, key=lambda x: -len(fbw[x]))[:40]:
         v = fbw[key]
-        S.append("  %-10s %d 处: %s" % (key, len(v), ", ".join("R%d" % x[0] for x in v)))
+        S.append("  %-10s %d 处: %s" % (key, len(v), "、".join(dict.fromkeys("行%s" % x[1] for x in v))))
 
     S.append("\n--- 3. 自保回路（负载地址出现在自己的条件里）---")
     latch = []
@@ -112,20 +113,20 @@ def main():
             latch.append((k, er, addr, txt))
     S.append("自保持线圈: %d 处" % len(latch))
     for k, er, addr, txt in latch:
-        S.append("  R%03d(行%s) %-12s <- %s" % (k, er, addr, txt))
+        S.append("  行%s %-12s <- %s" % (er, addr, txt))
 
     S.append("\n--- 4. 恒真通路（条件为 1，无条件驱动）---")
     always = [(k, er, addr) for k, er, addr, txt, t, d, u in all_loads if txt == "1"]
     S.append("无条件驱动: %d 处" % len(always))
     for k, er, addr in always[:60]:
-        S.append("  R%03d(行%s) %s" % (k, er, addr))
+        S.append("  行%s %s" % (er, addr))
 
     S.append("\n--- 5. 恒假 / 不可达 ---")
     dead = [(k, er, addr, txt) for k, er, addr, txt, t, d, u in all_loads
             if u or txt == "0" or (d and not t)]
     S.append("不可达或恒假: %d 处" % len(dead))
     for k, er, addr, txt in dead[:40]:
-        S.append("  R%03d(行%s) %-12s <- %s" % (k, er, addr, txt))
+        S.append("  行%s %-12s <- %s" % (er, addr, txt))
 
     S.append("\n--- 6. 定时器 / 计数器 清单 ---")
     tm = collections.defaultdict(list)
@@ -138,10 +139,10 @@ def main():
     S.append("定时器 %d 个 / 计数器 %d 个" % (len(tm), len(ct)))
     for key in sorted(tm, key=lambda x: int(x[2:])):
         for k, er, addr, txt in tm[key]:
-            S.append("  %-8s R%03d(行%s) %-16s <- %s" % (key, k, er, addr, txt))
+            S.append("  %-8s 行%s %-16s <- %s" % (key, er, addr, txt))
     for key in sorted(ct, key=lambda x: int(x[1:])):
         for k, er, addr, txt in ct[key]:
-            S.append("  %-8s R%03d(行%s) %-16s <- %s" % (key, k, er, addr, txt))
+            S.append("  %-8s 行%s %-16s <- %s" % (key, er, addr, txt))
 
     S.append("\n--- 7. 比较块查表：按常数值分组（找缺口）---")
     # 比较块是 cond，不会出现在 analyze 的 loads 里，直接从解码后的元件扫。
@@ -170,7 +171,7 @@ def main():
         if len(nums) < 2:
             continue
         gaps = [n for n in range(min(nums), max(nums) + 1) if n not in nums]
-        S.append("  %-6s %d 个分支 K%d..K%d %s  rung %s" % (
+        S.append("  %-6s %d 个分支 #%d..#%d %s  行 %s" % (
             reg, len(nums), min(nums), max(nums),
             ("缺口 " + str(gaps)) if gaps else "连续无缺口",
             ",".join(str(x[2]) for x in v)))
@@ -178,7 +179,7 @@ def main():
     S.append("\n--- 7b. 功能块按 rung 分布（定时器/计数器/比较/运算/搬移）---")
     for k in sorted(fb_all):
         labs = [x[1] for x in fb_all[k]]
-        S.append("  R%03d (%2d 个): %s" % (k, len(labs), " | ".join(labs)))
+        S.append("  行%s (%2d 个): %s" % (er, len(labs), " | ".join(labs)))
 
     S.append("\n--- 8. 报警区 R40~R49 的线圈写法（手册要求自保）---")
     alarm = [(k, er, addr, txt) for k, er, addr, txt, t, d, u in all_loads
@@ -187,7 +188,7 @@ def main():
     latch_keys = {(k, addr) for k, er, addr, txt in latch}
     for k, er, addr, txt in sorted(alarm):
         tag = "自保" if (k, addr) in latch_keys else "**无自保**"
-        S.append("  R%03d(行%s) %-10s %-12s <- %s" % (k, er, addr, tag, txt))
+        S.append("  行%s %-10s %-12s <- %s" % (er, addr, tag, txt))
 
     S.append("\n--- 8b. 报警汇总覆盖（启发式，手册 1-5.22.46）---")
     # R40.0~R43.31 = 系统内定警报 1~64；R44.0~R49.15 = 自订 Alarm 65~160；
@@ -218,7 +219,7 @@ def main():
     for k, addr, regs, bits in summaries:
         uncovered = sorted(a for a in driven_alarm
                            if a.split(".")[0][1:] not in regs and a not in bits)
-        S.append("  R%03d %-8s 覆盖寄存器 K0<R%s  显式位 %d 个" % (
+        S.append("  行%s %-8s 覆盖寄存器 #0<R%s  显式位 %d 个" % (
             k, addr, ",".join(sorted(regs)) or "(无)", len(bits)))
         if uncovered:
             S.append("    ** 未纳入汇总的被驱动位 (%d): %s" %
@@ -229,7 +230,7 @@ def main():
         S.append("识别到「无报警」信号 (条件全为取反的报警位, 常串在 Cycle Start 互锁): %d 个" %
                  len(allclears))
         for k, addr, neg in allclears:
-            S.append("  R%03d %-8s 覆盖(取反)位 %d 个: %s" % (
+            S.append("  行%s %-8s 覆盖(取反)位 %d 个: %s" % (
                 k, addr, len(neg), ", ".join(sorted(neg))))
             # 取反位对应的报警亮起 -> 信号断开 (拦截);
             # 不在取反列表里的被驱动报警亮起 -> 信号不变, 不拦截

@@ -71,12 +71,14 @@ def el_to_dict(el):
         cat, op = el[1], el[2]
         if cat == 'TIMER':
             prec, src = REV_TIMER.get(op, ('1s', 'K'))
+            src = '#' if src == 'K' else src          # 对外统一用 # 表示常数
             param = el[5]
             val = param[0] | (param[1] << 8)
             return {'kind': 'timer', 'name': f'TM{el[3]}', 'precision': prec,
                     'source': src, 'preset': val}
         if cat == 'CNTR':
             d, src = REV_CNTR.get(op, ('UP', 'K'))
+            src = '#' if src == 'K' else src          # 对外统一用 # 表示常数
             param = el[5]
             val = param[0] | (param[1] << 8)
             return {'kind': 'counter', 'name': f'CT{el[3]}', 'direction': d,
@@ -104,12 +106,13 @@ def el_to_dict(el):
             return {'kind': 'raw', 'hex': L.enc_el(el).hex(' '),
                     'note': f'{cat} opcode 0x{op:02x} 无对应助记符'}
         if cat == 'CMP':
-            # 编辑器里比较块的两个槽位是**固定角色**: A 槽=常数, B 槽=寄存器。
-            # 早期这里按 _IMM 后缀判断, 于是 GTK/LTK/EQK 的 A 被解成寄存器、B 被解成
-            # 常数, 正好反了 —— 现场核对: 写入 A=R83 B=#0, 编辑器显示 "A=#83 B=R0",
-            # 意思变成「常数 83 与寄存器 R0 比较」, 判定永远不成立。
+            # op1 是常数还是寄存器由 opcode 决定 (官方 CMPx_ConstantToR vs CMPx_RtoR):
+            #   0x6a / 0x6c / 0x6e 的 A 槽 = #常数
+            #   0x5e / 0x62 / 0x66 的 A 槽 = 寄存器 (cnd_2 里 0x5e 的 A=961 就是 R961)
+            # 早期一律当常数, 会把 R961>R2011 读成 #961>R2011。
             return {'kind': 'compare', 'op': mnem,
-                    'A': num_to_operand(el[3], True), 'B': num_to_operand(el[4])}
+                    'A': num_to_operand(el[3], op in (0x6a, 0x6c, 0x6e)),
+                    'B': num_to_operand(el[4])}
         imm = mnem.endswith('_IMM')
         return {'kind': kind, 'op': mnem,
                 'A': num_to_operand(el[3], imm), 'B': num_to_operand(el[4])}
