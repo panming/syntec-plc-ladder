@@ -184,6 +184,12 @@ syntec-plc/
 
 ### 装
 
+**不想碰命令行**：用仓库的 `installer/`（`python tools/make_installer.py` 打成的 zip），
+解压后双击 `双击安装.bat`。它会检查 Python、跑自检、装技能包，并把 MCP 配置一起写进
+`~/.workbuddy/mcp.json`，改动前都留备份。对方只需要再点一次「信任」。
+
+**手动装**：
+
 ```bash
 # 用户级（所有项目可用）
 cp -r syntec-plc ~/.workbuddy/skills/

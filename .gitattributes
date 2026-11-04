@@ -8,3 +8,6 @@
 
 # .lad 是二进制，禁止任何转换
 *.lad binary
+
+# Windows 批处理必须是 CRLF，否则 cmd 解析 label/goto 会出错
+*.bat text eol=crlf

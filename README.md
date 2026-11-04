@@ -43,6 +43,7 @@
 │   ├── syntec_annotation.py          # 解析编辑器导出的注解档 CUSCMT_*.dat
 │   └── build_bundle.py               # 打包单文件版
 ├── tools/                            # 验证脚本 + 打包脚本
+├── installer/                        # 给零基础用户的安装包：双击安装.bat + setup.py + 安装说明.md
 ├── skill/syntec-plc/                 # 配套 AI 技能包：SKILL.md + 7 份参考 + 2 个脚本 + 模板
 ├── samples/                          # 10 个编辑器样本 + 1 个生成的并联演示
 └── docs/                             # 逆向过程记录
@@ -74,7 +75,10 @@ python tools/selftest.py
 
 ### 配置到 MCP 客户端
 
-在客户端的 MCP 配置里加一个 stdio 服务，`args` 指向文件的绝对路径：
+**完全不想碰命令行**：用[安装包](#给不碰命令行的人安装包)——双击一个 `.bat`，
+它自己检查 Python、装技能包、写好 MCP 配置，还会先备份你原来的配置。
+
+**手动配置**：在客户端的 MCP 配置里加一个 stdio 服务，`args` 指向文件的绝对路径：
 
 ```json
 {
@@ -163,6 +167,28 @@ cp -r skill/syntec-plc ~/.workbuddy/skills/
 | `assets/build_program.py` | MCP 不可用时的离线生成模板 |
 
 完整的文件说明、依据分级、覆盖范围见 [`skill/syntec-plc/README.md`](skill/syntec-plc/README.md)。
+
+### 给不碰命令行的人：安装包
+
+`installer/` 是给零基础用户准备的——他们卡在「打开命令行」这一步就结束了，
+所以做成双击就走的：
+
+| 文件 | 干什么 |
+|---|---|
+| `双击安装.bat` | 入口。找不到 Python 会自己打开下载页，并说明要勾哪个选项 |
+| `setup.py` | 干活的：查版本 → 试跑自检 → 装技能包 → 写 MCP 配置 |
+| `安装说明.md` | 给他看的：每步「你应该看到什么」、出错对照表、怎么卸载 |
+
+```bash
+python tools/make_installer.py     # 出 dist/syntec-plc-安装包-v1.13.1.zip（约 216 KB）
+```
+
+把这个 zip 发出去，对方解压、双击、点一次「信任」，就装完了。设计上四个取舍：
+
+- **所有改动先备份**：旧技能包改名 `syntec-plc.bak-时间戳`，旧 `mcp.json` 同名备份
+- **合并而不是覆盖** `mcp.json`：他机器上已经配的 SolidWorks、别的 MCP 服务原样保留
+- **自检不过就停**：宁可装不上，也不装一个跑不起来的工具上去
+- **`.bat` 全 CRLF**，并在 `.gitattributes` 里锁住——被转成 LF 后 cmd 解析 `label` 会出错
 
 ### 它挡掉了哪些坑
 
